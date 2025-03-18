@@ -4,4 +4,6 @@ import { NesVibes } from './emulator/emulator';
 
 
 const nesVibes = new NesVibes(3);
-nesVibes.setup(); 
+//const rom = "roms/nestest.nes";
+const rom = "roms/01-basics.nes";
+nesVibes.setup(rom); 

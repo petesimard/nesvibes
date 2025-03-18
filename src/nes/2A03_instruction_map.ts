@@ -1,9 +1,12 @@
+import { InstructionFunc } from "./cpu_2A03";
+
 // Interface for instruction metadata
 export interface InstructionMetadata {
     name: string;
     mode: AddressingMode;
     cycles: number;
     instruction_length: number;
+    instruction?: InstructionFunc;
 }
 
 
@@ -239,6 +242,9 @@ instructionMap[0x5A] = { name: 'NOP', mode: AddressingMode.Implied, cycles: 2, i
 instructionMap[0x7A] = { name: 'NOP', mode: AddressingMode.Implied, cycles: 2, instruction_length: 1 };
 instructionMap[0xDA] = { name: 'NOP', mode: AddressingMode.Implied, cycles: 2, instruction_length: 1 };
 instructionMap[0xFA] = { name: 'NOP', mode: AddressingMode.Implied, cycles: 2, instruction_length: 1 };
+
+instructionMap[0x00] = { name: 'BRK', mode: AddressingMode.Implied, cycles: 7, instruction_length: 1 }; // Unofficial
+
 
 
 instructionMap[0x04] = { name: '*NOP', mode: AddressingMode.Immediate, cycles: 3, instruction_length: 2 }; // Unofficial

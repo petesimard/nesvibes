@@ -2,7 +2,8 @@ import { numberToHex, u8toSigned } from "../emulator/utils";
 import { AddressingMode, AddressingModeNames, instructionMap, InstructionMetadata } from "./2A03_instruction_map";
 import { Nes } from "./nes";
 
-type Instruction = Generator;
+export type Instruction = Generator;
+export type InstructionFunc = (mode: AddressingMode) => Instruction;
 
 const DEBUG_BREAKPOINT_CYCLE: number | undefined = undefined;
 //const DEBUG_BREAKPOINT_CYCLE: number | undefined = 2560;
@@ -23,6 +24,8 @@ class InstructionResult {
 export class Cpu2A03 {
     nes: Nes;
 
+    cpuCycles: number = 0;
+
     register_PC: number = 0xFFFC;
     register_SP: number = 0xFD;
     register_X: number = 0x00;
@@ -38,6 +41,8 @@ export class Cpu2A03 {
     FLAG_BREAK: number = 1 << 5;
     FLAG_OVERFLOW: number = 1 << 6;
     FLAG_NEGATIVE: number = 1 << 7;
+
+    pendingNonMaskableInterruptFlag: boolean = false;
 
     STACK_START: number = 0x0100;
 
@@ -58,11 +63,14 @@ export class Cpu2A03 {
         this.register_Y = 0x00;
         this.register_SP = 0xFD;
         this.register_A = 0x00;
-        //this.register_PC = this.nes.read16(0xFFFC);
-        this.register_PC = 0x6000;
+
+        this.register_PC = this.nes.read16(0xFFFC);
+        //this.register_PC = 0x6000;
+        console.log(`PC: ${numberToHex(this.register_PC)}`);
     }
 
     clock() {
+        this.cpuCycles++;
         //console.log(`Clock Start PC: ${numberToHex(this.register_PC)}`);
         if (this.instruction != undefined) {
             this.processCurrentInstruction();
@@ -81,6 +89,11 @@ export class Cpu2A03 {
         //console.log(`Instruction: ${numberToHex(instructionOpCode)}`);
         this.instruction = this.getInstructionFunc(instructionOpCode);
         this.toggleFlag(this.FLAG_BREAK, true);
+
+        if (this.pendingNonMaskableInterruptFlag) {
+            this.pendingNonMaskableInterruptFlag = false;
+            this.instruction = this.ExecuteNMI();
+        }
 
         // Advance PC to next instruction
         this.advancePC();
@@ -136,7 +149,7 @@ export class Cpu2A03 {
 
         this.instructionResult = new InstructionResult();
         this.instructionResult.instructionMetadata = instructionMap[instructionOpCode];
-        this.instructionResult.cycles = this.nes.cycles;
+        this.instructionResult.cycles = this.cpuCycles;
         for (let i = 0; i < instructionData.instruction_length; i++) {
             this.instructionResult.instructionBytes.push(this.nes.read(this.register_PC + i));
         }
@@ -150,236 +163,28 @@ export class Cpu2A03 {
     }
 
 
-    getInstructionFunc(instructionOpCode: number): Instruction {
-        const instructionData = instructionMap[instructionOpCode];
+    * ExecuteNMI(): Instruction {
+        const currentPC = this.register_PC;
+        this.pushStack16(this.register_PC - 1);
+        yield;
+        this.pushStack(this.status_flags);
+        yield;
+        this.status_flags |= this.FLAG_BREAK;
+        yield;
+        this.register_PC = this.nes.read16(0xFFFA);
+        yield this.noop_loop(3);
+        this.toggleFlag(this.FLAG_INTERRUPT, true);
 
-        let instructionFunc: Instruction | undefined = undefined;
+        this.nes.log(`NMI: PC: ${numberToHex(this.register_PC)} old PC: ${numberToHex(currentPC)} SP: ${numberToHex(this.register_SP)} A: ${numberToHex(this.register_A)} X: ${numberToHex(this.register_X)} Y: ${numberToHex(this.register_Y)} P: ${numberToHex(this.status_flags)}`);
+    }
 
-        //console.log(`Processing instruction: ${instructionData.name} ${AddressingModeNames[instructionData.mode]}`);
+    // BRK - Break
+    * processInstruction_BRK(): Instruction {
+        this.pushStack16(this.register_PC + 2);
+        this.pushStack(this.status_flags | this.FLAG_BREAK);
+        this.register_PC = this.nes.read16(0xFFFE);
 
-        switch (instructionData.name) {
-            case "ADC":
-                instructionFunc = this.processInstruction_ADC(instructionData.mode);
-                break;
-            case "SBC":
-                instructionFunc = this.processInstruction_SBC(instructionData.mode);
-                break;
-            case "AND":
-                instructionFunc = this.processInstruction_AND(instructionData.mode);
-                break;
-            case "BIT":
-                instructionFunc = this.processInstruction_BIT(instructionData.mode);
-                break;
-            case "ORA":
-                instructionFunc = this.processInstruction_ORA(instructionData.mode);
-                break;
-            case "EOR":
-                instructionFunc = this.processInstruction_EOR(instructionData.mode);
-                break;
-            case "ASL":
-                instructionFunc = this.processInstruction_ASL(instructionData.mode);
-                break;
-            case "JMP":
-                instructionFunc = this.processInstruction_JMP(instructionData.mode);
-                break;
-            case "JSR":
-                instructionFunc = this.processInstruction_JSR(instructionData.mode);
-                break;
-            case "RTS":
-                instructionFunc = this.processInstruction_RTS();
-                break;
-            case "RTI":
-                instructionFunc = this.processInstruction_RTI();
-                break;
-            case "LDX":
-                instructionFunc = this.processInstruction_LDX(instructionData.mode);
-                break;
-            case "LDY":
-                instructionFunc = this.processInstruction_LDY(instructionData.mode);
-                break;
-            case "LDA":
-                instructionFunc = this.processInstruction_LDA(instructionData.mode);
-                break;
-            case "STX":
-                instructionFunc = this.processInstruction_STX(instructionData.mode);
-                break;
-            case "STY":
-                instructionFunc = this.processInstruction_STY(instructionData.mode);
-                break;
-            case "STA":
-                instructionFunc = this.processInstruction_STA(instructionData.mode);
-                break;
-            case "NOP":
-                instructionFunc = this.processInstruction_NOP();
-                break;
-            case "*NOP":
-                instructionFunc = this.processInstruction_NOP(1, 1);
-                break;
-            case "!NOP":
-                instructionFunc = this.processInstruction_NOP(2, 2);
-                break;
-            case "&NOP":
-                instructionFunc = this.processInstruction_NOP(2, 1);
-                break;
-            case "+NOP":
-                instructionFunc = this.processInstruction_NOP(0, 1);
-                break;
-            case "@NOP":
-                instructionFunc = this.processInstruction_NOP_ReadAddress(instructionData.mode);
-                break;
-            case "SEC":
-                instructionFunc = this.processInstruction_SEC();
-                break;
-            case "CLC":
-                instructionFunc = this.processInstruction_CLC();
-                break;
-            case "CLD":
-                instructionFunc = this.processInstruction_CLD();
-                break;
-            case "SED":
-                instructionFunc = this.processInstruction_SED();
-                break;
-            case "CLI":
-                instructionFunc = this.processInstruction_CLI();
-                break;
-            case "SEI":
-                instructionFunc = this.processInstruction_SEI();
-                break;
-            case "CLV":
-                instructionFunc = this.processInstruction_CLV();
-                break;
-            case "BCC":
-                instructionFunc = this.processInstruction_BCC(instructionData.mode);
-                break;
-            case "BCS":
-                instructionFunc = this.processInstruction_BCS(instructionData.mode);
-                break;
-            case "BEQ":
-                instructionFunc = this.processInstruction_BEQ(instructionData.mode);
-                break;
-            case "BNE":
-                instructionFunc = this.processInstruction_BNE(instructionData.mode);
-                break;
-            case "BPL":
-                instructionFunc = this.processInstruction_BPL(instructionData.mode);
-                break;
-            case "BMI":
-                instructionFunc = this.processInstruction_BMI(instructionData.mode);
-                break;
-            case "BVC":
-                instructionFunc = this.processInstruction_BVC(instructionData.mode);
-                break;
-            case "BVS":
-                instructionFunc = this.processInstruction_BVS(instructionData.mode);
-                break;
-            case "CMP":
-                instructionFunc = this.processInstruction_CMP(instructionData.mode);
-                break;
-            case "CPX":
-                instructionFunc = this.processInstruction_CPX(instructionData.mode);
-                break;
-            case "CPY":
-                instructionFunc = this.processInstruction_CPY(instructionData.mode);
-                break;
-            case "PHP":
-                instructionFunc = this.processInstruction_PHP();
-                break;
-            case "PLP":
-                instructionFunc = this.processInstruction_PLP();
-                break;
-            case "PLA":
-                instructionFunc = this.processInstruction_PLA();
-                break;
-            case "PHA":
-                instructionFunc = this.processInstruction_PHA();
-                break;
-            case "INC":
-                instructionFunc = this.processInstruction_INC(instructionData.mode);
-                break;
-            case "INX":
-                instructionFunc = this.processInstruction_INX();
-                break;
-            case "INY":
-                instructionFunc = this.processInstruction_INY();
-                break;
-            case "DEC":
-                instructionFunc = this.processInstruction_DEC(instructionData.mode);
-                break;
-            case "DEX":
-                instructionFunc = this.processInstruction_DEX();
-                break;
-            case "DEY":
-                instructionFunc = this.processInstruction_DEY();
-                break;
-            case "TAX":
-                instructionFunc = this.processInstruction_TAX();
-                break;
-            case "TAY":
-                instructionFunc = this.processInstruction_TAY();
-                break;
-            case "TXA":
-                instructionFunc = this.processInstruction_TXA();
-                break;
-            case "TYA":
-                instructionFunc = this.processInstruction_TYA();
-                break;
-            case "TSX":
-                instructionFunc = this.processInstruction_TSX();
-                break;
-            case "TXS":
-                instructionFunc = this.processInstruction_TXS();
-                break;
-            case "LSR":
-                instructionFunc = this.processInstruction_LSR(instructionData.mode);
-                break;
-            case "ROL":
-                instructionFunc = this.processInstruction_ROL(instructionData.mode);
-                break;
-            case "ROR":
-                instructionFunc = this.processInstruction_ROR(instructionData.mode);
-                break;
-            case "*LAX":
-                instructionFunc = this.processInstruction_LAX(instructionData.mode);
-                break;
-            case "*SAX":
-                instructionFunc = this.processInstruction_SAX(instructionData.mode);
-                break;
-            case "DCP":
-                instructionFunc = this.processInstruction_DCP(instructionData.mode);
-                break;
-            case "ISB":
-                instructionFunc = this.processInstruction_ISB(instructionData.mode);
-                break;
-            case "SLO":
-                instructionFunc = this.processInstruction_SLO(instructionData.mode);
-                break;
-            case "RLA":
-                instructionFunc = this.processInstruction_RLA(instructionData.mode);
-                break;
-            case "SRE":
-                instructionFunc = this.processInstruction_SRE(instructionData.mode);
-                break;
-            case "RRA":
-                instructionFunc = this.processInstruction_RRA(instructionData.mode);
-                break;
-
-            default:
-                throw new Error(`Unknown instruction: ${instructionData.name}`);
-        }
-
-        if (instructionFunc == undefined) {
-            throw new Error(`Unknown instruction: ${instructionData.name}`);
-        }
-
-        let instructionWrapper = function* () {
-            // Jump function should execute immediately
-            if (!(instructionData.name == "JMP" || instructionData.name == "JSR")) {
-                yield;
-            }
-
-            yield* instructionFunc;
-        }();
-        return instructionWrapper;
+        this.toggleFlag(this.FLAG_INTERRUPT, true);
     }
 
     // RRA - Rotate Right and Accumulator
@@ -1614,5 +1419,256 @@ export class Cpu2A03 {
             this.instructionResult.instructionMetadata?.name == "SLO" ||
             this.instructionResult.instructionMetadata?.name.startsWith("AS"))
             ?? false;
+    }
+
+    NMI() {
+        this.pendingNonMaskableInterruptFlag = true;
+    }
+
+
+    getInstructionFunc(instructionOpCode: number): Instruction {
+        const instructionData = instructionMap[instructionOpCode];
+
+        let instructionFunc: InstructionFunc | undefined = undefined;
+
+        //console.log(`Processing instruction: ${instructionData.name} ${AddressingModeNames[instructionData.mode]}`);
+
+        if (instructionData.instruction != undefined) {
+            instructionFunc = instructionData.instruction;
+        }
+        else {
+
+            switch (instructionData.name) {
+                case "ADC":
+                    instructionFunc = this.processInstruction_ADC;
+                    break;
+                case "SBC":
+                    instructionFunc = this.processInstruction_SBC;
+                    break;
+                case "AND":
+                    instructionFunc = this.processInstruction_AND;
+                    break;
+                case "BIT":
+                    instructionFunc = this.processInstruction_BIT;
+                    break;
+                case "ORA":
+                    instructionFunc = this.processInstruction_ORA;
+                    break;
+                case "EOR":
+                    instructionFunc = this.processInstruction_EOR;
+                    break;
+                case "ASL":
+                    instructionFunc = this.processInstruction_ASL;
+                    break;
+                case "JMP":
+                    instructionFunc = this.processInstruction_JMP;
+                    break;
+                case "JSR":
+                    instructionFunc = this.processInstruction_JSR;
+                    break;
+                case "RTS":
+                    instructionFunc = this.processInstruction_RTS;
+                    break;
+                case "RTI":
+                    instructionFunc = this.processInstruction_RTI;
+                    break;
+                case "LDX":
+                    instructionFunc = this.processInstruction_LDX;
+                    break;
+                case "LDY":
+                    instructionFunc = this.processInstruction_LDY;
+                    break;
+                case "LDA":
+                    instructionFunc = this.processInstruction_LDA;
+                    break;
+                case "STX":
+                    instructionFunc = this.processInstruction_STX;
+                    break;
+                case "STY":
+                    instructionFunc = this.processInstruction_STY;
+                    break;
+                case "STA":
+                    instructionFunc = this.processInstruction_STA;
+                    break;
+                case "NOP":
+                    instructionFunc = this.processInstruction_NOP;
+                    break;
+                case "*NOP":
+                    instructionFunc = () => this.processInstruction_NOP(1, 1);
+                    break;
+                case "!NOP":
+                    instructionFunc = () => this.processInstruction_NOP(2, 2);
+                    break;
+                case "&NOP":
+                    instructionFunc = () => this.processInstruction_NOP(2, 1);
+                    break;
+                case "+NOP":
+                    instructionFunc = () => this.processInstruction_NOP(0, 1);
+                    break;
+                case "@NOP":
+                    instructionFunc = this.processInstruction_NOP_ReadAddress;
+                    break;
+                case "SEC":
+                    instructionFunc = this.processInstruction_SEC;
+                    break;
+                case "CLC":
+                    instructionFunc = this.processInstruction_CLC;
+                    break;
+                case "CLD":
+                    instructionFunc = this.processInstruction_CLD;
+                    break;
+                case "SED":
+                    instructionFunc = this.processInstruction_SED;
+                    break;
+                case "CLI":
+                    instructionFunc = this.processInstruction_CLI;
+                    break;
+                case "SEI":
+                    instructionFunc = this.processInstruction_SEI;
+                    break;
+                case "CLV":
+                    instructionFunc = this.processInstruction_CLV;
+                    break;
+                case "BCC":
+                    instructionFunc = this.processInstruction_BCC;
+                    break;
+                case "BCS":
+                    instructionFunc = this.processInstruction_BCS;
+                    break;
+                case "BEQ":
+                    instructionFunc = this.processInstruction_BEQ;
+                    break;
+                case "BNE":
+                    instructionFunc = this.processInstruction_BNE;
+                    break;
+                case "BPL":
+                    instructionFunc = this.processInstruction_BPL;
+                    break;
+                case "BMI":
+                    instructionFunc = this.processInstruction_BMI;
+                    break;
+                case "BVC":
+                    instructionFunc = this.processInstruction_BVC;
+                    break;
+                case "BVS":
+                    instructionFunc = this.processInstruction_BVS;
+                    break;
+                case "CMP":
+                    instructionFunc = this.processInstruction_CMP;
+                    break;
+                case "CPX":
+                    instructionFunc = this.processInstruction_CPX;
+                    break;
+                case "CPY":
+                    instructionFunc = this.processInstruction_CPY;
+                    break;
+                case "PHP":
+                    instructionFunc = this.processInstruction_PHP;
+                    break;
+                case "PLP":
+                    instructionFunc = this.processInstruction_PLP;
+                    break;
+                case "PLA":
+                    instructionFunc = this.processInstruction_PLA;
+                    break;
+                case "PHA":
+                    instructionFunc = this.processInstruction_PHA;
+                    break;
+                case "INC":
+                    instructionFunc = this.processInstruction_INC;
+                    break;
+                case "INX":
+                    instructionFunc = this.processInstruction_INX;
+                    break;
+                case "INY":
+                    instructionFunc = this.processInstruction_INY;
+                    break;
+                case "DEC":
+                    instructionFunc = this.processInstruction_DEC;
+                    break;
+                case "DEX":
+                    instructionFunc = this.processInstruction_DEX;
+                    break;
+                case "DEY":
+                    instructionFunc = this.processInstruction_DEY;
+                    break;
+                case "TAX":
+                    instructionFunc = this.processInstruction_TAX;
+                    break;
+                case "TAY":
+                    instructionFunc = this.processInstruction_TAY;
+                    break;
+                case "TXA":
+                    instructionFunc = this.processInstruction_TXA;
+                    break;
+                case "TYA":
+                    instructionFunc = this.processInstruction_TYA;
+                    break;
+                case "TSX":
+                    instructionFunc = this.processInstruction_TSX;
+                    break;
+                case "TXS":
+                    instructionFunc = this.processInstruction_TXS;
+                    break;
+                case "LSR":
+                    instructionFunc = this.processInstruction_LSR;
+                    break;
+                case "ROL":
+                    instructionFunc = this.processInstruction_ROL;
+                    break;
+                case "ROR":
+                    instructionFunc = this.processInstruction_ROR;
+                    break;
+                case "*LAX":
+                    instructionFunc = this.processInstruction_LAX;
+                    break;
+                case "*SAX":
+                    instructionFunc = this.processInstruction_SAX;
+                    break;
+                case "DCP":
+                    instructionFunc = this.processInstruction_DCP;
+                    break;
+                case "ISB":
+                    instructionFunc = this.processInstruction_ISB;
+                    break;
+                case "SLO":
+                    instructionFunc = this.processInstruction_SLO;
+                    break;
+                case "RLA":
+                    instructionFunc = this.processInstruction_RLA;
+                    break;
+                case "SRE":
+                    instructionFunc = this.processInstruction_SRE;
+                    break;
+                case "RRA":
+                    instructionFunc = this.processInstruction_RRA;
+                    break;
+                case "BRK":
+                    instructionFunc = this.processInstruction_BRK;
+                    break;
+
+                default:
+                    throw new Error(`Unknown instruction: ${instructionData.name}`);
+            }
+
+            instructionData.instruction = instructionFunc;
+        }
+
+        if (instructionFunc == undefined) {
+            throw new Error(`Unknown instruction: ${instructionData.name}`);
+        }
+
+        const instructionFunctionGenerator = instructionFunc.call(this, instructionData.mode);
+
+        let instructionWrapper = function* () {
+            // Jump function should execute immediately
+            if (!(instructionData.name == "JMP" || instructionData.name == "JSR")) {
+                yield;
+            }
+
+            yield* instructionFunctionGenerator;
+        }();
+
+        return instructionWrapper;
     }
 }

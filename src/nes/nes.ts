@@ -1,12 +1,16 @@
 import { Cartridge } from "./cartridge";
 import { Cpu2A03 } from "./cpu_2A03";
 import { RAM } from "./ram";
+import { PPU } from "./ppu";
 import { numberToHex } from "../emulator/utils";
-
+import { APU } from "./apu";
 export class Nes {
     private cpu: Cpu2A03;
     private cartridge: Cartridge;
     private ram: RAM;
+    private ppu: PPU;
+    private apu: APU;
+
     private logger: (message: string) => void;
 
     public cycles: number = 0;
@@ -19,6 +23,8 @@ export class Nes {
         this.cpu = new Cpu2A03(this);
         this.cartridge = new Cartridge(this);
         this.ram = new RAM(this, 2048);
+        this.ppu = new PPU(this);
+        this.apu = new APU(this);
     }
 
     public getCpu(): Cpu2A03 {
@@ -31,12 +37,21 @@ export class Nes {
 
     onReset() {
         this.cpu.onReset();
+        this.ppu.onReset();
+        this.apu.onReset();
         this.cycles = 6;
     }
 
     clock() {
-        this.cycles++;
-        this.cpu.clock();
+
+        for (let i = 0; i < 3; i++) {
+            this.ppu.clock();
+            this.cycles++;
+
+            if (i == 0) {
+                this.cpu.clock();
+            }
+        }
     }
 
     loadROM(rom: Uint8Array) {
@@ -68,6 +83,12 @@ export class Nes {
         else if (address == this.CPU_BUSADDRESS_REGISTER_A) {
             return this.cpu.register_A;
         }
+        else if (address >= 0x2000 && address <= 0x3FFF) {
+            return this.ppu.read(address);
+        }
+        else if (address >= 0x4000 && address <= 0x4017) {
+            return this.apu.read(address);
+        }
 
         console.error(`Read from unknown address: ${numberToHex(address)}`);
         return 0;
@@ -92,9 +113,19 @@ export class Nes {
         else if (address == this.CPU_BUSADDRESS_REGISTER_A) {
             this.cpu.register_A = value;
         }
+        else if (address >= 0x2000 && address <= 0x3FFF) {
+            this.ppu.write(address, value);
+        }
+        else if (address >= 0x4000 && address <= 0x4017) {
+            this.apu.write(address, value);
+        }
         else {
             throw new Error(`Write to unknown address: ${numberToHex(address)}`);
         }
+    }
 
+    NMI() {
+        this.cpu.NMI();
+        console.log("NMI");
     }
 }

@@ -18,19 +18,25 @@ async function downloadTestLog() {
     }
 }
 
-const testLog = await downloadTestLog();
-const logLines = testLog.split('\n');
+//const testLog = await downloadTestLog();
+//const logLines = testLog.split('\n');
+const logLines: string[] = [];
 let logLineCount = 0;
+const logContainer = document.getElementById('log-container');
+const line = document.createElement('p');
+
+const logMessages: string[] = [];
 
 function log(message: string) {
-    const logContainer = document.getElementById('log-container');
     if (!logContainer)
         return;
 
+    logMessages.push(message);
+    if (logMessages.length > 100) {
+        logMessages.shift();
+    }
 
-    const line = document.createElement('p');
-
-    line.textContent = message;
+    line.textContent = logMessages.join('\n');
     logContainer.appendChild(line);
 
     // Get the matching line from test log for comparison
@@ -103,8 +109,8 @@ export class NesVibes {
         this.nes = new Nes(log);
     }
 
-    async setup() {
-        await this.loadROM("roms/nestest.nes");
+    async setup(rom: string) {
+        await this.loadROM(rom);
         this.nes.onReset();
 
         const stackContainer = document.getElementById('stack-container');
@@ -113,7 +119,7 @@ export class NesVibes {
             this.p5.background(0);
             this.p5.scale(this.scale);
 
-            for (let i = 0; i < 500; i++) {
+            for (let i = 0; i < 1000; i++) {
                 this.nes.clock();
                 this.updateStackDisplay(stackContainer);
             }
