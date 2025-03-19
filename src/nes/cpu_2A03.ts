@@ -50,7 +50,7 @@ export class Cpu2A03 {
     instruction: Instruction | undefined = undefined;
     addressRegister: number = 0x00;
     instructionResult: InstructionResult = new InstructionResult();
-    pendingInterruptFlag: boolean | undefined = undefined;
+    pendingInterruptDisableFlag: boolean | undefined = undefined;
 
     constructor(nes: Nes) {
         this.nes = nes;
@@ -63,8 +63,9 @@ export class Cpu2A03 {
         this.register_Y = 0x00;
         this.register_SP = 0xFD;
         this.register_A = 0x00;
-
         this.register_PC = this.nes.read16(0xFFFC);
+        this.instruction = undefined;
+        this.cpuCycles = 6;
         //this.register_PC = 0x6000;
         console.log(`PC: ${numberToHex(this.register_PC)}`);
     }
@@ -77,26 +78,29 @@ export class Cpu2A03 {
             return;
         }
 
-        if (this.pendingInterruptFlag != undefined) {
-            this.toggleFlag(this.FLAG_INTERRUPT, this.pendingInterruptFlag);
-            this.pendingInterruptFlag = undefined;
+        if (this.pendingInterruptDisableFlag != undefined) {
+            this.toggleFlag(this.FLAG_INTERRUPT, this.pendingInterruptDisableFlag);
+            this.pendingInterruptDisableFlag = undefined;
         }
 
-        //console.log(`PC: ${numberToHex(this.register_PC)}`);
-        const instructionOpCode = this.nes.read(this.register_PC);
-        this.logInstruction();
-
-        //console.log(`Instruction: ${numberToHex(instructionOpCode)}`);
-        this.instruction = this.getInstructionFunc(instructionOpCode);
-        this.toggleFlag(this.FLAG_BREAK, true);
 
         if (this.pendingNonMaskableInterruptFlag) {
             this.pendingNonMaskableInterruptFlag = false;
             this.instruction = this.ExecuteNMI();
+            this.logInstruction(0x00);
         }
+        else {
 
-        // Advance PC to next instruction
-        this.advancePC();
+            const instructionOpCode = this.nes.read(this.register_PC);
+            this.logInstruction(instructionOpCode);
+
+            //console.log(`Instruction: ${numberToHex(instructionOpCode)}`);
+            this.instruction = this.getInstructionFunc(instructionOpCode);
+            this.toggleFlag(this.FLAG_BREAK, true);
+
+            // Advance PC to next instruction
+            this.advancePC();
+        }
 
         this.processCurrentInstruction();
     }
@@ -138,9 +142,36 @@ export class Cpu2A03 {
         this.register_PC++;
     }
 
-    private logInstruction() {
-        //console.log(`PC: ${numberToHex(this.register_PC)}`);
-        const instructionOpCode = this.nes.read(this.register_PC);
+    public getCycles(): number {
+        return this.cpuCycles;
+    }
+
+    public getPC(): number {
+        return this.register_PC;
+    }
+
+    public getA(): number {
+        return this.register_A;
+    }
+
+    public getX(): number {
+        return this.register_X;
+    }
+
+    public getY(): number {
+        return this.register_Y;
+    }
+
+    public getP(): number {
+        return this.status_flags;
+    }
+
+    public getSP(): number {
+        return this.register_SP;
+    }
+
+
+    private logInstruction(instructionOpCode: number) {
 
         const instructionData = instructionMap[instructionOpCode];
         if (!instructionData) {
@@ -165,17 +196,22 @@ export class Cpu2A03 {
 
     * ExecuteNMI(): Instruction {
         const currentPC = this.register_PC;
-        this.pushStack16(this.register_PC - 1);
+        this.nes.log(`NMI Start: Saved PC: ${numberToHex(currentPC)}`);
+
         yield;
-        this.pushStack(this.status_flags);
         yield;
-        this.status_flags |= this.FLAG_BREAK;
+        this.pushStack(currentPC >> 8);
+        yield;
+        this.pushStack(currentPC & 0xFF);
+        yield;
+        this.pushStack(this.status_flags & ~this.FLAG_BREAK);
         yield;
         this.register_PC = this.nes.read16(0xFFFA);
-        yield this.noop_loop(3);
         this.toggleFlag(this.FLAG_INTERRUPT, true);
+        yield;
+        yield;
 
-        this.nes.log(`NMI: PC: ${numberToHex(this.register_PC)} old PC: ${numberToHex(currentPC)} SP: ${numberToHex(this.register_SP)} A: ${numberToHex(this.register_A)} X: ${numberToHex(this.register_X)} Y: ${numberToHex(this.register_Y)} P: ${numberToHex(this.status_flags)}`);
+        this.nes.log(`NMI End: New PC: ${numberToHex(this.register_PC)}`);
     }
 
     // BRK - Break
@@ -614,7 +650,7 @@ export class Cpu2A03 {
         this.toggleFlag(this.FLAG_NEGATIVE, (newFlags & this.FLAG_NEGATIVE) != 0);
         yield;
 
-        this.pendingInterruptFlag = (newFlags & this.FLAG_INTERRUPT) != 0;
+        this.pendingInterruptDisableFlag = (newFlags & this.FLAG_INTERRUPT) != 0;
     }
 
     // PHA - Push Accumulator
@@ -808,7 +844,7 @@ export class Cpu2A03 {
 
     // SEI - Set Interrupt Disable
     * processInstruction_SEI(): Instruction {
-        this.pendingInterruptFlag = true;
+        this.pendingInterruptDisableFlag = true;
     }
 
     // CLV - Clear Overflow Flag
@@ -977,9 +1013,13 @@ export class Cpu2A03 {
 
     // RTI - Return from Interrupt
     * processInstruction_RTI(): Instruction {
-        this.status_flags = this.popStack() | this.FLAG_BREAK;
+        this.status_flags = this.popStack();
         this.register_PC = this.popStack16();
         yield* this.noop_loop(4);
+
+        if (this.nes.breakOnRti) {
+            this.nes.togglePause();
+        }
     }
 
     // ASL - Arithmetic Shift Left
@@ -1423,6 +1463,7 @@ export class Cpu2A03 {
 
     NMI() {
         this.pendingNonMaskableInterruptFlag = true;
+        //console.log(`NMI triggered on ${numberToHex(this.register_PC)} Instruction: ${this.instructionResult.instructionMetadata?.name}`);
     }
 
 

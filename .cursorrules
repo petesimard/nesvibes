@@ -1,0 +1,5 @@
+Use tailwindcss for styling (it is already installed)
+This is a NES emulator.
+The NES is a 6502 based system.
+The NES has a PPU for rendering.
+The NES has an APU for sound.

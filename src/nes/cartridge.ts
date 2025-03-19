@@ -8,9 +8,23 @@ export class Cartridge implements BusDevice {
     characterRom: Uint8Array = new Uint8Array();
     nes: Nes;
     mapperNumber: number = 0;
+    flags6: number = 0;
 
     constructor(nes: Nes) {
         this.nes = nes;
+    }
+
+    ppu_read(address: number): number {
+        if (address <= 0x3EFF) {
+            return this.characterRom[address];
+        }
+        else {
+            throw new Error("PPU read: Invalid address " + numberToHex(address));
+        }
+    }
+
+    ppu_write(address: number, value: number): void {
+
     }
 
     read(address: number): number {
@@ -43,6 +57,10 @@ export class Cartridge implements BusDevice {
         }
     }
 
+    public isHorizontalMirroring(): boolean {
+        return (this.flags6 & 1) == 1;
+    }
+
     loadROM(rom: Uint8Array) {
         console.log(`Loading ROM with ${rom.length} bytes`);
 
@@ -62,13 +80,13 @@ export class Cartridge implements BusDevice {
         const chrRomSize = header[5];
         //console.log(`CHR ROM size: ${chrRomSize}`);
 
-        const flags6 = header[6];
+        this.flags6 = header[6];
         //console.log(`Flags 6: ${flags6}`);
 
         const flags7 = header[7];
         //console.log(`Flags 7: ${flags7}`);
 
-        this.mapperNumber = (flags6 >> 4) | (flags7 & 0xF0);
+        this.mapperNumber = (this.flags6 >> 4) | (flags7 & 0xF0);
         console.log(`Mapper number: ${this.mapperNumber}`);
 
         const flags8 = header[8];

@@ -20,74 +20,21 @@ async function downloadTestLog() {
 
 //const testLog = await downloadTestLog();
 //const logLines = testLog.split('\n');
-const logLines: string[] = [];
-let logLineCount = 0;
 const logContainer = document.getElementById('log-container');
 const line = document.createElement('p');
+logContainer!.appendChild(line);
+const stackContainer = document.getElementById('stack-container');
+const patternTable0 = document.getElementById('pattern-table-0');
+const patternTable1 = document.getElementById('pattern-table-1');
 
+const breakNmi = document.getElementById('break-nmi') as HTMLInputElement;
+const breakRti = document.getElementById('break-sti') as HTMLInputElement;
+const breakInstruction = document.getElementById('break-instruction') as HTMLInputElement;
+const breakCycle = document.getElementById('break-cycle') as HTMLInputElement;
+const pauseResumeButton = document.getElementById('pause-resume');
+const resetButton = document.getElementById('reset') as HTMLButtonElement;
+const stepButton = document.getElementById('step') as HTMLButtonElement;
 const logMessages: string[] = [];
-
-function log(message: string) {
-    if (!logContainer)
-        return;
-
-    logMessages.push(message);
-    if (logMessages.length > 100) {
-        logMessages.shift();
-    }
-
-    line.textContent = logMessages.join('\n');
-    logContainer.appendChild(line);
-
-    // Get the matching line from test log for comparison
-    let expectedLogLine = logLines[logLineCount]?.trim() || '';
-
-    // If we have an expected line, show both actual and expected
-    if (expectedLogLine && logLineCount > 0) {
-
-        // Parse values from expected and actual lines
-        const parseLogLine = (line: string) => {
-            const matches = line.match(/^([A-F0-9]{4})\s+.*\s+A:([A-F0-9]{2})\s+X:([A-F0-9]{2})\s+Y:([A-F0-9]{2})\s+P:([A-F0-9]{2})\s+SP:([A-F0-9]{2}).*CYC:(\d+)/);
-            if (!matches) return null;
-            return {
-                address: matches[1],
-                regA: matches[2],
-                regX: matches[3],
-                regY: matches[4],
-                flags: matches[5],
-                sp: matches[6],
-                cycles: parseInt(matches[7])
-            };
-        };
-
-        const expectedValues = parseLogLine(expectedLogLine);
-        const actualValues = parseLogLine(message);
-
-        let mismatch = false;
-        if (expectedValues && actualValues) {
-            mismatch = expectedValues.address !== actualValues.address ||
-                expectedValues.regA !== actualValues.regA ||
-                expectedValues.regX !== actualValues.regX ||
-                expectedValues.regY !== actualValues.regY ||
-                expectedValues.flags !== actualValues.flags ||
-                expectedValues.sp !== actualValues.sp ||
-                expectedValues.cycles !== actualValues.cycles;
-        }
-
-        if (mismatch) {
-            const expectedLine = document.createElement('p');
-            expectedLine.style.color = 'red';
-            expectedLogLine = expectedLogLine.substring(0, 20) + expectedLogLine.substring(37);
-            expectedLine.textContent = `${expectedLogLine}`;
-            logContainer.appendChild(expectedLine);
-            throw new Error('Mismatch');
-        }
-    }
-
-    logContainer.scrollTop = logContainer.scrollHeight;
-    logLineCount++;
-}
-
 
 
 export class NesVibes {
@@ -100,38 +47,142 @@ export class NesVibes {
 
         const sketch = (p5: P5) => {
             p5.setup = () => {
-                p5.createCanvas(256 * scale, 240 * scale);
+                const canvas = document.getElementById('canvas')!;
+                p5.createCanvas(256 * scale, 240 * scale).parent(canvas);
                 p5.background(0);
             };
         };
 
         this.p5 = new P5(sketch);
-        this.nes = new Nes(log);
+        this.nes = new Nes((message: string) => {
+            if (!logContainer)
+                return;
+
+            logMessages.push(message);
+            if (logMessages.length > 20000) {
+                logMessages.shift();
+            }
+
+            if (!this.nes.isPaused())
+                return;
+
+            this.updateLogWindow();
+        });
+
+        this.nes.onPausedListeners.push(() => {
+            this.updateDebug();
+
+            pauseResumeButton!.textContent = this.nes.isPaused() ? 'Resume' : 'Pause';
+            pauseResumeButton!.style.backgroundColor = !this.nes.isPaused() ? 'green' : 'red';
+
+            if (stepButton) {
+                stepButton.disabled = !this.nes.isPaused();
+            }
+
+        });
+
+        if (stepButton) {
+            stepButton.addEventListener('click', () => {
+                this.nes.clock(true);
+                this.updateDebug();
+            });
+        }
+
+        // Add pause/resume functionality
+        if (pauseResumeButton) {
+            pauseResumeButton.addEventListener('click', () => {
+                this.nes.togglePause();
+                pauseResumeButton!.textContent = this.nes.isPaused() ? 'Resume' : 'Pause';
+                pauseResumeButton!.style.backgroundColor = !this.nes.isPaused() ? 'green' : 'red';
+
+            });
+        }
+
+        if (resetButton) {
+            resetButton.addEventListener('click', () => {
+                this.nes.onReset();
+            });
+        }
+
+        if (breakNmi) {
+            breakNmi.addEventListener('change', () => {
+                this.nes.toggleBreakOnNmi(breakNmi.checked);
+            });
+        }
+
+        if (breakRti) {
+            breakRti.addEventListener('change', () => {
+                this.nes.toggleBreakOnRti(breakRti.checked);
+            });
+        }
+
+    }
+
+    private updateDebug() {
+        this.updateDebugDisplay();
+        this.updateLogWindow();
+        this.updatePatternTables();
+    }
+
+    private updateLogWindow() {
+        line.textContent = logMessages.join('\n');
+        logContainer!.scrollTop = logContainer!.scrollHeight;
     }
 
     async setup(rom: string) {
         await this.loadROM(rom);
         this.nes.onReset();
 
-        const stackContainer = document.getElementById('stack-container');
+        this.updatePatternTables();
+
 
         this.p5.draw = () => {
             this.p5.background(0);
             this.p5.scale(this.scale);
 
-            for (let i = 0; i < 1000; i++) {
+            for (let i = 0; i < 10000; i++) {
                 this.nes.clock();
-                this.updateStackDisplay(stackContainer);
             }
             this.p5.fill(255, 0, 0);
-            this.p5.circle(256 / 2, 240 / 2, 100);
-
         }
 
     }
+    updatePatternTables() {
+        if (!patternTable0 || !patternTable1)
+            return;
+
+        const patternTable0Canvas = patternTable0 as HTMLCanvasElement;
+        const patternTable1Canvas = patternTable1 as HTMLCanvasElement;
+
+        const ctx0 = patternTable0Canvas.getContext('2d');
+        const ctx1 = patternTable1Canvas.getContext('2d');
+
+        if (!ctx0 || !ctx1)
+            return;
+
+        ctx0.putImageData(this.nes.getPpu().getPatternTableImage(0), 0, 0);
+        ctx1.putImageData(this.nes.getPpu().getPatternTableImage(1), 0, 0);
+    }
 
 
-    private updateStackDisplay(stackContainer: HTMLElement | null) {
+    private updateDebugDisplay() {
+
+        const regA = document.getElementById('reg-a');
+        const regX = document.getElementById('reg-x');
+        const regY = document.getElementById('reg-y');
+        const regP = document.getElementById('reg-p');
+        const regSP = document.getElementById('reg-sp');
+        const regPC = document.getElementById('reg-pc');
+        const regCycles = document.getElementById('reg-cycles');
+
+        if (regA) regA.textContent = numberToHex(this.nes.getCpu().getA());
+        if (regX) regX.textContent = numberToHex(this.nes.getCpu().getX());
+        if (regY) regY.textContent = numberToHex(this.nes.getCpu().getY());
+        if (regP) regP.textContent = numberToHex(this.nes.getCpu().getP());
+        if (regSP) regSP.textContent = numberToHex(this.nes.getCpu().getSP());
+        if (regPC) regPC.textContent = numberToHex(this.nes.getCpu().getPC());
+        if (regCycles) regCycles.textContent = this.nes.getCpu().getCycles().toString();
+
         if (stackContainer) {
             const stackStart = 0x01FF;
             const stackEnd = 0x0100;

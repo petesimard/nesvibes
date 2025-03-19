@@ -5,6 +5,7 @@ import { PPU } from "./ppu";
 import { numberToHex } from "../emulator/utils";
 import { APU } from "./apu";
 export class Nes {
+
     private cpu: Cpu2A03;
     private cartridge: Cartridge;
     private ram: RAM;
@@ -14,9 +15,13 @@ export class Nes {
     private logger: (message: string) => void;
 
     public cycles: number = 0;
+    public onPausedListeners: (() => void)[] = [];
+    public breakOnRti: boolean = false;
 
     // This is a hack to allow the CPU to read the value of the accumulator via the bus
     public CPU_BUSADDRESS_REGISTER_A: number = 0xFFFFFF + 1;
+    _isPaused: any;
+    breakOnNmi: boolean = false;
 
     constructor(logger: (message: string) => void) {
         this.logger = logger;
@@ -27,8 +32,36 @@ export class Nes {
         this.apu = new APU(this);
     }
 
+    public isPaused(): boolean {
+        return this._isPaused;
+    }
+
     public getCpu(): Cpu2A03 {
         return this.cpu;
+    }
+
+    public getPpu(): PPU {
+        return this.ppu;
+    }
+
+    public getApu(): APU {
+        return this.apu;
+    }
+
+    public toggleBreakOnNmi(value: boolean) {
+        this.breakOnNmi = value;
+    }
+
+    public toggleBreakOnRti(value: boolean) {
+        this.breakOnRti = value;
+    }
+
+    getCartridge() {
+        return this.cartridge;
+    }
+
+    getRam() {
+        return this.ram;
     }
 
     log(message: string) {
@@ -42,7 +75,10 @@ export class Nes {
         this.cycles = 6;
     }
 
-    clock() {
+    clock(step: boolean = false) {
+        if (this._isPaused && !step) {
+            return;
+        }
 
         for (let i = 0; i < 3; i++) {
             this.ppu.clock();
@@ -51,6 +87,13 @@ export class Nes {
             if (i == 0) {
                 this.cpu.clock();
             }
+        }
+    }
+
+    togglePause() {
+        this._isPaused = !this._isPaused;
+        if (this._isPaused) {
+            this.onPausedListeners.forEach(listener => listener());
         }
     }
 
@@ -127,5 +170,10 @@ export class Nes {
     NMI() {
         this.cpu.NMI();
         console.log("NMI");
+
+        if (this.breakOnNmi) {
+            console.log("Break on NMI");
+            this.togglePause();
+        }
     }
 }
