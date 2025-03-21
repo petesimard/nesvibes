@@ -104,6 +104,18 @@ export class Nes {
         this.cartridge.loadROM(rom);
     }
 
+    isNormalAddress(address: number): boolean {
+        if (address >= 0x2000 && address <= 0x3FFF) {
+            return false;
+        }
+        else if (address >= 0x4000 && address <= 0x4017) {
+            return false;
+        }
+        else {
+            return true;
+        }
+    }
+
     read16(address: number): number {
         const lowByte = this.read(address);
         const highByte = this.read(address + 1);

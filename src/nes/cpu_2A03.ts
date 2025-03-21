@@ -921,7 +921,10 @@ export class Cpu2A03 {
             }
         }
 
-        this.instructionResult.target_address_memory = this.nes.read(address!);
+        if (this.nes.isNormalAddress(address!)) {
+            this.instructionResult.target_address_memory = this.nes.read(address!);
+        }
+
         this.nes.write(address!, this.register_X);
     }
 
@@ -936,7 +939,9 @@ export class Cpu2A03 {
             }
         }
 
-        this.instructionResult.target_address_memory = this.nes.read(address!);
+        if (this.nes.isNormalAddress(address!)) {
+            this.instructionResult.target_address_memory = this.nes.read(address!);
+        }
         this.nes.write(address!, this.register_Y);
     }
 
@@ -951,7 +956,9 @@ export class Cpu2A03 {
             }
         }
 
-        this.instructionResult.target_address_memory = this.nes.read(address!);
+        if (this.nes.isNormalAddress(address!)) {
+            this.instructionResult.target_address_memory = this.nes.read(address!);
+        }
         this.nes.write(address!, this.register_A);
     }
 
@@ -1135,7 +1142,9 @@ export class Cpu2A03 {
         this.toggleFlag(this.FLAG_OVERFLOW, (value & (1 << 6)) != 0);
         this.toggleFlag(this.FLAG_NEGATIVE, (value & (1 << 7)) != 0);
 
-        this.instructionResult.target_address_memory = this.nes.read(address!);
+        if (this.nes.isNormalAddress(address!)) {
+            this.instructionResult.target_address_memory = this.nes.read(address!);
+        }
     }
 
     // ORA - Logical OR

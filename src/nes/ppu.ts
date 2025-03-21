@@ -369,20 +369,23 @@ export class PPU implements BusDevice {
     }
 
     renderScanline() {
-        if ((this.current_dot - 1) % 8 == 0) {
+        if ((this.current_dot >= 1 && this.current_dot <= 256) || (this.current_dot >= 321 && this.current_dot <= 336)) {
+            this.doMemoryFetches();
+        }
+
+        if (this.current_dot > 8 && (this.current_dot - 1) % 8 == 0) {
             // transfer tile to latched tile (aka shift register)
-            this.latched_tileLow = this.register_internal_tileLow;
-            this.latched_tileHigh = this.register_internal_tileHigh;
+            this.latched_tileLow = ((this.latched_tileLow << 8) & 0xFF00) | this.register_internal_tileLow;
+            this.latched_tileHigh = ((this.latched_tileHigh << 8) & 0xFF00) | this.register_internal_tileHigh;
         }
 
         if (this.current_dot >= 1 && this.current_dot <= 256 && this.isVisualScanline()) {
             this.renderPixel();
         }
 
-        this.doMemoryFetches();
 
-        if ((this.current_dot >= 0 && this.current_dot <= 256) || this.current_dot >= 328) {
-            const isHvIncrement = this.current_dot > 0 && this.current_dot % 8 == 0;
+        if ((this.current_dot > 0 && this.current_dot <= 256) || this.current_dot >= 328) {
+            const isHvIncrement = (this.current_dot) % 8 == 0;
 
             if (isHvIncrement) {
                 if ((this.register_internal_V & 0x001F) == 31) { // if coarse X == 31
@@ -466,8 +469,8 @@ export class PPU implements BusDevice {
 
     renderPixel() {
         const pixelX = (this.current_dot - 1) % 8;
-        let lowBit = (this.latched_tileLow & (1 << (7 - pixelX))) != 0 ? 1 : 0;
-        let highBit = (this.latched_tileHigh & (1 << (7 - pixelX))) != 0 ? 1 : 0;
+        let lowBit = (this.latched_tileLow & (1 << (15 - pixelX))) != 0 ? 1 : 0;
+        let highBit = (this.latched_tileHigh & (1 << (15 - pixelX))) != 0 ? 1 : 0;
 
         if (this.current_dot <= 8 && (this.register_PPUMASK & this.flags_PPUMASK_SHOW_BACKGROUND_IN_LEFT_8) == 0) {
             lowBit = 0;
@@ -476,14 +479,47 @@ export class PPU implements BusDevice {
 
         const value = lowBit | (highBit << 1);
 
-        const finalColor = [
-            value * 85,
-            value * 85,
-            value * 85,
-            255
-        ]
+        const finalColor = this.bitsToColor(value);
 
         this.nes.setRenderedPixel(this.current_dot - 1, this.current_scanline, finalColor);
+    }
+
+    private bitsToColor(value: number) {
+        let finalColor = [];
+
+        if (value == 0) {
+            finalColor = [
+                0,
+                0,
+                0,
+                255
+            ];
+        }
+        else if (value == 1) {
+            finalColor = [
+                255,
+                0,
+                0,
+                255
+            ];
+        }
+        else if (value == 2) {
+            finalColor = [
+                0,
+                255,
+                0,
+                255
+            ];
+        }
+        else {
+            finalColor = [
+                0,
+                0,
+                255,
+                255
+            ];
+        }
+        return finalColor;
     }
 
     onReset() {
@@ -574,9 +610,11 @@ export class PPU implements BusDevice {
 
                         const pixelIndex = (imagePixelX + imagePixelY * 256) * 4;
 
-                        image.data[pixelIndex] = value * 85;
-                        image.data[pixelIndex + 1] = value * 85;
-                        image.data[pixelIndex + 2] = value * 85;
+                        const finalColor = this.bitsToColor(value);
+
+                        image.data[pixelIndex] = finalColor[0];
+                        image.data[pixelIndex + 1] = finalColor[1];
+                        image.data[pixelIndex + 2] = finalColor[2];
                         image.data[pixelIndex + 3] = 255;
                     }
                 }
