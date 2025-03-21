@@ -13,6 +13,7 @@ export class Nes {
     private apu: APU;
 
     private logger: (message: string) => void;
+    private onRenderedPixel: (x: number, y: number, finalColor: number[]) => void;
 
     public cycles: number = 0;
     public onPausedListeners: (() => void)[] = [];
@@ -23,8 +24,9 @@ export class Nes {
     _isPaused: any;
     breakOnNmi: boolean = false;
 
-    constructor(logger: (message: string) => void) {
+    constructor(logger: (message: string) => void, onRenderedPixel: (current_dot: number, current_scanline: number, finalColor: number[]) => void) {
         this.logger = logger;
+        this.onRenderedPixel = onRenderedPixel;
         this.cpu = new Cpu2A03(this);
         this.cartridge = new Cartridge(this);
         this.ram = new RAM(this, 2048);
@@ -81,12 +83,13 @@ export class Nes {
         }
 
         for (let i = 0; i < 3; i++) {
-            this.ppu.clock();
-            this.cycles++;
 
-            if (i == 0) {
+            this.ppu.clock();
+
+            if (i == 2) {
                 this.cpu.clock();
             }
+            this.cycles++;
         }
     }
 
@@ -175,5 +178,10 @@ export class Nes {
             console.log("Break on NMI");
             this.togglePause();
         }
+    }
+
+
+    setRenderedPixel(x: number, y: number, finalColor: number[]) {
+        this.onRenderedPixel(x, y, finalColor);
     }
 }

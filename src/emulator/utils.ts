@@ -3,6 +3,9 @@ export function bytesToHex(bytes: Uint8Array): string {
 }
 
 export function numberToHex(number: number): string {
+    if (number == undefined)
+        return 'UNDEFINED';
+
     return number.toString(16).padStart(2, '0').toUpperCase();
 }
 

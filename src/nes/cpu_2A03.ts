@@ -12,13 +12,18 @@ class InstructionResult {
     cycles: number = 0;
     instructionMetadata: InstructionMetadata | undefined = undefined;
     instructionBytes: number[] = [];
-    instruction_target: number | undefined = undefined;
     register_PC: number = 0xFFFC;
     register_SP: number = 0xFD;
     register_X: number = 0x00;
     register_Y: number = 0x00;
     register_A: number = 0x00;
     status_flags: number = 0;
+    target_address: number | undefined = undefined;
+    target_address_memory: number | undefined = undefined;
+    indirectOffsetBase: number | undefined = undefined;
+    indirectOffset: number | undefined = undefined;
+    ppu_scanline: number = 0;
+    ppu_dot: number = 0;
 }
 
 export class Cpu2A03 {
@@ -65,13 +70,18 @@ export class Cpu2A03 {
         this.register_A = 0x00;
         this.register_PC = this.nes.read16(0xFFFC);
         this.instruction = undefined;
-        this.cpuCycles = 6;
+        this.cpuCycles = 0;
         //this.register_PC = 0x6000;
-        console.log(`PC: ${numberToHex(this.register_PC)}`);
+        //console.log(`PC: ${numberToHex(this.register_PC)}`);
     }
 
     clock() {
         this.cpuCycles++;
+
+        if (this.cpuCycles < 7) {
+            return;
+        }
+
         //console.log(`Clock Start PC: ${numberToHex(this.register_PC)}`);
         if (this.instruction != undefined) {
             this.processCurrentInstruction();
@@ -116,21 +126,40 @@ export class Cpu2A03 {
 
             let instructionTargetAddress = '';
 
-            if (this.instructionResult.instruction_target != undefined) {
-                instructionTargetAddress = '$' + numberToHex(this.instructionResult.instruction_target!);
-                if (this.instructionResult.instructionMetadata?.mode == AddressingMode.Immediate)
-                    instructionTargetAddress = '#' + instructionTargetAddress;
-            }
+            //CFEA  A1 80     LDA ($80,X) @ 83 = 0303 = 5C    A:5B X:03 Y:69 P:25 SP:FB PPU: 22,217 CYC:2573
 
-            instructionTargetAddress = instructionTargetAddress.padEnd(12, ' ');
+            if (this.instructionResult.target_address != undefined) {
+                if (this.instructionResult.instructionMetadata?.mode == AddressingMode.IndirectX || this.instructionResult.instructionMetadata?.mode == AddressingMode.IndirectY) {
+                    instructionTargetAddress += '($' + numberToHex(this.instructionResult.indirectOffsetBase!) + ',';
+                    if (this.instructionResult.instructionMetadata?.mode == AddressingMode.IndirectX)
+                        instructionTargetAddress += 'X)';
+                    else
+                        instructionTargetAddress += 'Y)';
+
+                    instructionTargetAddress += ' @ ' + numberToHex(this.instructionResult.indirectOffset!);
+                    instructionTargetAddress += ' = ' + numberToHex(this.instructionResult.target_address!).padStart(4, '0');
+                }
+                else {
+
+                    if (this.instructionResult.instructionMetadata?.mode == AddressingMode.Immediate)
+                        instructionTargetAddress += '#' + instructionTargetAddress;
+
+                    instructionTargetAddress += '$' + numberToHex(this.instructionResult.target_address!);
+                }
+            }
 
             // pad the instruction bytes to 3 characters
-            let instructionString = this.instructionResult.instructionBytes.map(b => numberToHex(b)).join(" ");
-            if (instructionString.length < 8) {
-                instructionString = instructionString.padEnd(8, ' ');
-            }
+            let instructionBytesString = this.instructionResult.instructionBytes.map(b => numberToHex(b)).join(" ");
+            instructionBytesString = instructionBytesString.padEnd(9, ' ');
 
-            this.nes.log(`${numberToHex(this.instructionResult.register_PC)} ${instructionString} ${this.instructionResult.instructionMetadata?.name} ${instructionTargetAddress} A:${numberToHex(this.instructionResult.register_A)} X:${numberToHex(this.instructionResult.register_X)} Y:${numberToHex(this.instructionResult.register_Y)} P:${numberToHex(this.instructionResult.status_flags)} SP:${numberToHex(this.instructionResult.register_SP)} PPU:  0, 0 CYC:${this.instructionResult.cycles}`);
+            let decodedInstruction = this.instructionResult.instructionMetadata?.name + ' ' + instructionTargetAddress;
+
+            if (this.instructionResult.target_address_memory != undefined) {
+                decodedInstruction += ' = ' + numberToHex(this.instructionResult.target_address_memory);
+            }
+            decodedInstruction = decodedInstruction.padEnd(31, ' ');
+
+            this.nes.log(`${numberToHex(this.instructionResult.register_PC).toString().padEnd(5, ' ')} ${instructionBytesString} ${decodedInstruction} A:${numberToHex(this.instructionResult.register_A)} X:${numberToHex(this.instructionResult.register_X)} Y:${numberToHex(this.instructionResult.register_Y)} P:${numberToHex(this.instructionResult.status_flags)} SP:${numberToHex(this.instructionResult.register_SP)} PPU:${this.instructionResult.ppu_scanline.toString().padStart(3, ' ')},${this.instructionResult.ppu_dot.toString().padStart(3, ' ')} CYC:${this.instructionResult.cycles}`);
 
             if (DEBUG_BREAKPOINT_CYCLE != undefined && this.instructionResult.cycles >= DEBUG_BREAKPOINT_CYCLE) {
                 throw new Error("Breakpoint reached");
@@ -191,6 +220,8 @@ export class Cpu2A03 {
         this.instructionResult.register_Y = this.register_Y;
         this.instructionResult.register_A = this.register_A;
         this.instructionResult.status_flags = this.status_flags;
+        this.instructionResult.ppu_scanline = this.nes.getPpu().current_scanline;
+        this.instructionResult.ppu_dot = this.nes.getPpu().current_dot;
     }
 
 
@@ -859,7 +890,7 @@ export class Cpu2A03 {
 
 
     // NOP - No Operation
-    * processInstruction_NOP(extraCycles: number = 0, extraReads: number = 0): Instruction {
+    * processInstruction_NOP(extraCycles: number, extraReads: number): Instruction {
         for (let i = 0; i < extraReads; i++) {
             this.advancePC();
         }
@@ -890,6 +921,7 @@ export class Cpu2A03 {
             }
         }
 
+        this.instructionResult.target_address_memory = this.nes.read(address!);
         this.nes.write(address!, this.register_X);
     }
 
@@ -904,6 +936,7 @@ export class Cpu2A03 {
             }
         }
 
+        this.instructionResult.target_address_memory = this.nes.read(address!);
         this.nes.write(address!, this.register_Y);
     }
 
@@ -918,6 +951,7 @@ export class Cpu2A03 {
             }
         }
 
+        this.instructionResult.target_address_memory = this.nes.read(address!);
         this.nes.write(address!, this.register_A);
     }
 
@@ -936,7 +970,10 @@ export class Cpu2A03 {
         this.toggleFlag(this.FLAG_NEGATIVE, (value & (1 << 7)) != 0);
 
         this.register_X = value;
-        this.instructionResult.instruction_target = value;
+
+        if (mode == AddressingMode.IndirectX || mode == AddressingMode.IndirectY) {
+            this.instructionResult.target_address_memory = value;
+        }
     }
 
     // LDY - Load Y Register
@@ -954,6 +991,9 @@ export class Cpu2A03 {
         this.toggleFlag(this.FLAG_NEGATIVE, (value & (1 << 7)) != 0);
 
         this.register_Y = value;
+        if (mode == AddressingMode.IndirectX || mode == AddressingMode.IndirectY) {
+            this.instructionResult.target_address_memory = value;
+        }
     }
 
     // LDA - Load Accumulator
@@ -971,6 +1011,9 @@ export class Cpu2A03 {
         this.toggleFlag(this.FLAG_NEGATIVE, (value & (1 << 7)) != 0);
 
         this.register_A = value;
+        if (mode == AddressingMode.IndirectX || mode == AddressingMode.IndirectY) {
+            this.instructionResult.target_address_memory = value;
+        }
     }
 
 
@@ -988,6 +1031,8 @@ export class Cpu2A03 {
         this.register_PC = address!;
     }
 
+    subCt: number = 0;
+
     // JSR - Jump to Subroutine
     * processInstruction_JSR(mode: AddressingMode): Instruction {
         this.pushStack16(this.register_PC + 1);
@@ -1003,6 +1048,7 @@ export class Cpu2A03 {
         }
 
         this.register_PC = address!;
+        this.subCt++;
     }
 
     // RTS - Return from Subroutine
@@ -1070,20 +1116,26 @@ export class Cpu2A03 {
 
     // BIT - Test Bits
     * processInstruction_BIT(mode: AddressingMode): Instruction {
-        let value!: number;
-        for (const v of this.readValue(mode)) {
-            if (v == undefined) {
+
+        let address = undefined;
+        let addressGenerator = this.getAddressGenerator(mode);
+
+        for (address of addressGenerator) {
+            if (address == undefined) {
                 yield;
-                continue;
             }
-            value = v;
         }
+
+        let value = this.nes.read(address!);
+
 
         const result = this.register_A & value;
 
         this.toggleFlag(this.FLAG_ZERO, result == 0);
         this.toggleFlag(this.FLAG_OVERFLOW, (value & (1 << 6)) != 0);
         this.toggleFlag(this.FLAG_NEGATIVE, (value & (1 << 7)) != 0);
+
+        this.instructionResult.target_address_memory = this.nes.read(address!);
     }
 
     // ORA - Logical OR
@@ -1168,7 +1220,7 @@ export class Cpu2A03 {
         switch (mode) {
             case AddressingMode.Immediate:
                 value = this.nes.read(this.register_PC);
-                this.instructionResult.instruction_target = value;
+                this.instructionResult.target_address = value;
                 this.advancePC();
                 break;
             default:
@@ -1243,7 +1295,7 @@ export class Cpu2A03 {
                 finalAddress = address;
                 yield address;
             }
-            instructionResult.instruction_target = finalAddress!;
+            instructionResult.target_address = finalAddress!;
         }();
 
         return addressGeneratorWrapper;
@@ -1272,6 +1324,7 @@ export class Cpu2A03 {
     * getIndirectYAddress(): Generator<number | undefined> {
         // Get the zero page address (arg) and store it in temp_register
         const arg = this.nes.read(this.register_PC);
+        this.instructionResult.indirectOffsetBase = arg;
         this.advancePC();
         yield undefined;
         // Get the value at the zero page address + Y to get the high byte
@@ -1290,6 +1343,8 @@ export class Cpu2A03 {
 
         const finalAddress = (address + this.register_Y) % 0x10000;
 
+        this.instructionResult.indirectOffset = arg + this.register_Y;
+
         //console.log(`getIndirectYAddress (${numberToHex(arg)},Y) @ ${numberToHex(this.register_Y)} = ${numberToHex(finalAddress)} L:${numberToHex(lowByte)} H:${numberToHex(highByte)}`);
 
         yield finalAddress;
@@ -1299,6 +1354,7 @@ export class Cpu2A03 {
     * getIndirectXAddress(): Generator<number | undefined> {
         // Get the zero page address (arg) and store it in temp_register
         let arg = this.nes.read(this.register_PC);
+        this.instructionResult.indirectOffsetBase = arg;
         this.advancePC();
         yield undefined;
         // Get the value at the zero page address + X to get the high byte
@@ -1313,7 +1369,8 @@ export class Cpu2A03 {
         //console.log(`LDA (${numberToHex(arg)},X) @ ${numberToHex(this.register_X)} = ${numberToHex(address)} ZPA1: ${numberToHex(zeroPageAddress)} ZPA2: ${numberToHex(zeroPageAddress2)}`);
         yield address;
         //val = PEEK(  PEEK((arg + X) % 256) + PEEK( (arg + X + 1) % 256) * 256  )	
-        //  LDA ($80,X) @ 80 = 0200 = 5A
+
+        this.instructionResult.indirectOffset = arg + this.register_X;
     }
 
     * getAbsoluteXAddress(): Generator<number | undefined> {
@@ -1532,7 +1589,7 @@ export class Cpu2A03 {
                     instructionFunc = this.processInstruction_STA;
                     break;
                 case "NOP":
-                    instructionFunc = this.processInstruction_NOP;
+                    instructionFunc = () => this.processInstruction_NOP(0, 0);
                     break;
                 case "*NOP":
                     instructionFunc = () => this.processInstruction_NOP(1, 1);

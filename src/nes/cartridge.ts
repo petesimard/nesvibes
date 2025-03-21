@@ -15,7 +15,7 @@ export class Cartridge implements BusDevice {
     }
 
     ppu_read(address: number): number {
-        if (address <= 0x3EFF) {
+        if (address <= 0x1FFF) {
             return this.characterRom[address];
         }
         else {
@@ -24,7 +24,12 @@ export class Cartridge implements BusDevice {
     }
 
     ppu_write(address: number, value: number): void {
-
+        if (address <= 0x1FFF) {
+            this.characterRom[address] = value;
+        }
+        else {
+            throw new Error("PPU write: Invalid address " + numberToHex(address));
+        }
     }
 
     read(address: number): number {

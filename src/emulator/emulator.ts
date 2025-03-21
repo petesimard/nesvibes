@@ -1,6 +1,7 @@
 import P5 from "p5";
 import { Nes } from "../nes/nes";
 import { numberToHex } from "./utils";
+import p5 from "p5";
 
 
 // Download test log from logs/nestest.log
@@ -24,9 +25,9 @@ const logContainer = document.getElementById('log-container');
 const line = document.createElement('p');
 logContainer!.appendChild(line);
 const stackContainer = document.getElementById('stack-container');
-const patternTable0 = document.getElementById('pattern-table-0');
-const patternTable1 = document.getElementById('pattern-table-1');
-
+const patternTable0 = document.getElementById('pattern-table-0') as HTMLCanvasElement;
+const patternTable1 = document.getElementById('pattern-table-1') as HTMLCanvasElement;
+const nameTable0 = document.getElementById('name-table-0') as HTMLCanvasElement;
 const breakNmi = document.getElementById('break-nmi') as HTMLInputElement;
 const breakRti = document.getElementById('break-sti') as HTMLInputElement;
 const breakInstruction = document.getElementById('break-instruction') as HTMLInputElement;
@@ -42,6 +43,9 @@ export class NesVibes {
     private scale: number;
     private nes: Nes;
 
+    private currentRenderedFrame: p5.Image;
+    private nextRenderedFrame: p5.Image;
+
     constructor(scale: number = 1) {
         this.scale = scale;
 
@@ -52,6 +56,17 @@ export class NesVibes {
                 p5.background(0);
             };
         };
+
+        const onRenderedPixel = (x: number, y: number, finalColor: number[]) => {
+            this.nextRenderedFrame.set(x, y, finalColor)
+
+            if (x == 255 && y == 239) {
+                const oldFrame = this.currentRenderedFrame;
+                this.currentRenderedFrame = this.nextRenderedFrame;
+                this.currentRenderedFrame.updatePixels();
+                this.nextRenderedFrame = oldFrame;
+            }
+        }
 
         this.p5 = new P5(sketch);
         this.nes = new Nes((message: string) => {
@@ -67,7 +82,10 @@ export class NesVibes {
                 return;
 
             this.updateLogWindow();
-        });
+        }, onRenderedPixel);
+
+        this.currentRenderedFrame = this.p5.createImage(256, 240);
+        this.nextRenderedFrame = this.p5.createImage(256, 240);
 
         this.nes.onPausedListeners.push(() => {
             this.updateDebug();
@@ -135,33 +153,44 @@ export class NesVibes {
 
         this.updatePatternTables();
 
+        const ctx3 = nameTable0.getContext('2d');
 
         this.p5.draw = () => {
             this.p5.background(0);
-            this.p5.scale(this.scale);
+            this.p5.scale(this.scale).noSmooth();
+
+            this.p5.fill(255, 0, 0);
+            this.p5.image(this.currentRenderedFrame, 0, 0);
+
+
+            ctx3!.putImageData(this.nes.getPpu().getNameTableImage(0), 0, 0);
 
             for (let i = 0; i < 10000; i++) {
-                this.nes.clock();
+                try {
+                    this.nes.clock();
+                } catch (error) {
+                    this.nes.togglePause();
+                    throw error;
+                }
             }
-            this.p5.fill(255, 0, 0);
         }
-
     }
+
     updatePatternTables() {
         if (!patternTable0 || !patternTable1)
             return;
 
-        const patternTable0Canvas = patternTable0 as HTMLCanvasElement;
-        const patternTable1Canvas = patternTable1 as HTMLCanvasElement;
 
-        const ctx0 = patternTable0Canvas.getContext('2d');
-        const ctx1 = patternTable1Canvas.getContext('2d');
+        const ctx0 = patternTable0.getContext('2d');
+        const ctx1 = patternTable1.getContext('2d');
+        const ctx3 = nameTable0.getContext('2d');
 
-        if (!ctx0 || !ctx1)
+        if (!ctx0 || !ctx1 || !ctx3)
             return;
 
         ctx0.putImageData(this.nes.getPpu().getPatternTableImage(0), 0, 0);
         ctx1.putImageData(this.nes.getPpu().getPatternTableImage(1), 0, 0);
+        ctx3.putImageData(this.nes.getPpu().getNameTableImage(0), 0, 0);
     }
 
 
