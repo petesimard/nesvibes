@@ -89,14 +89,22 @@
                     </div>
                 </div>
             </div>
-            <div id="debug-output"></div>
+            <div id="debug-output">
+            </div>
         </div>
     </div>
 
     <div class="flex gap-5">
         <div id="stack-container"
             class="w-[300px] flex-shrink-0 bg-black/80 text-white font-mono p-2.5 rounded-lg h-[200px]"></div>
-        <div id="log-container" class="flex-grow bg-black/80 text-white font-mono p-2.5 rounded-lg h-[200px]"></div>
+        <div id="log-container" class="flex-grow bg-black/80 text-white font-mono p-2.5 rounded-lg h-[200px] relative">
+            <p id="log-line"></p>
+        </div>
+        <button id="copy-log"
+            class="mt-2 px-3 py-1.5 bg-neutral-700 hover:bg-neutral-600 text-white rounded text-sm h-[30px]"
+            onclick="navigator.clipboard.writeText(document.getElementById('log-line').textContent)">
+            Copy
+        </button>
     </div>
 
     <div class="flex gap-5">

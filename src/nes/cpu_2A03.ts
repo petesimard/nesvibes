@@ -8,7 +8,7 @@ export type InstructionFunc = (mode: AddressingMode) => Instruction;
 const DEBUG_BREAKPOINT_CYCLE: number | undefined = undefined;
 //const DEBUG_BREAKPOINT_CYCLE: number | undefined = 2560;
 
-class InstructionResult {
+export class InstructionResult {
     cycles: number = 0;
     instructionMetadata: InstructionMetadata | undefined = undefined;
     instructionBytes: number[] = [];
@@ -56,6 +56,7 @@ export class Cpu2A03 {
     addressRegister: number = 0x00;
     instructionResult: InstructionResult = new InstructionResult();
     pendingInterruptDisableFlag: boolean | undefined = undefined;
+    debug_break_on_next_instruction: boolean = false;
 
     constructor(nes: Nes) {
         this.nes = nes;
@@ -72,7 +73,7 @@ export class Cpu2A03 {
         this.instruction = undefined;
         this.cpuCycles = 0;
         //this.register_PC = 0x6000;
-        //console.log(`PC: ${numberToHex(this.register_PC)}`);
+        console.log(`Initial PC: ${numberToHex(this.register_PC)}`);
     }
 
     clock() {
@@ -124,44 +125,14 @@ export class Cpu2A03 {
         if (result.done) {
             this.instruction = undefined;
 
-            let instructionTargetAddress = '';
-
-            //CFEA  A1 80     LDA ($80,X) @ 83 = 0303 = 5C    A:5B X:03 Y:69 P:25 SP:FB PPU: 22,217 CYC:2573
-
-            if (this.instructionResult.target_address != undefined) {
-                if (this.instructionResult.instructionMetadata?.mode == AddressingMode.IndirectX || this.instructionResult.instructionMetadata?.mode == AddressingMode.IndirectY) {
-                    instructionTargetAddress += '($' + numberToHex(this.instructionResult.indirectOffsetBase!) + ',';
-                    if (this.instructionResult.instructionMetadata?.mode == AddressingMode.IndirectX)
-                        instructionTargetAddress += 'X)';
-                    else
-                        instructionTargetAddress += 'Y)';
-
-                    instructionTargetAddress += ' @ ' + numberToHex(this.instructionResult.indirectOffset!);
-                    instructionTargetAddress += ' = ' + numberToHex(this.instructionResult.target_address!).padStart(4, '0');
-                }
-                else {
-
-                    if (this.instructionResult.instructionMetadata?.mode == AddressingMode.Immediate)
-                        instructionTargetAddress += '#' + instructionTargetAddress;
-
-                    instructionTargetAddress += '$' + numberToHex(this.instructionResult.target_address!);
-                }
-            }
-
-            // pad the instruction bytes to 3 characters
-            let instructionBytesString = this.instructionResult.instructionBytes.map(b => numberToHex(b)).join(" ");
-            instructionBytesString = instructionBytesString.padEnd(9, ' ');
-
-            let decodedInstruction = this.instructionResult.instructionMetadata?.name + ' ' + instructionTargetAddress;
-
-            if (this.instructionResult.target_address_memory != undefined) {
-                decodedInstruction += ' = ' + numberToHex(this.instructionResult.target_address_memory);
-            }
-            decodedInstruction = decodedInstruction.padEnd(31, ' ');
-
-            this.nes.log(`${numberToHex(this.instructionResult.register_PC).toString().padEnd(5, ' ')} ${instructionBytesString} ${decodedInstruction} A:${numberToHex(this.instructionResult.register_A)} X:${numberToHex(this.instructionResult.register_X)} Y:${numberToHex(this.instructionResult.register_Y)} P:${numberToHex(this.instructionResult.status_flags)} SP:${numberToHex(this.instructionResult.register_SP)} PPU:${this.instructionResult.ppu_scanline.toString().padStart(3, ' ')},${this.instructionResult.ppu_dot.toString().padStart(3, ' ')} CYC:${this.instructionResult.cycles}`);
+            this.nes.logInstruction(this.instructionResult);
 
             if (DEBUG_BREAKPOINT_CYCLE != undefined && this.instructionResult.cycles >= DEBUG_BREAKPOINT_CYCLE) {
+                throw new Error("Breakpoint reached");
+            }
+
+            if (this.debug_break_on_next_instruction) {
+                console.log(`Breakpoint reached from debug_break_on_next_instruction`);
                 throw new Error("Breakpoint reached");
             }
         }
@@ -1043,6 +1014,7 @@ export class Cpu2A03 {
     // JSR - Jump to Subroutine
     * processInstruction_JSR(mode: AddressingMode): Instruction {
         this.pushStack16(this.register_PC + 1);
+        //console.log(`JSR ${numberToHex(this.register_PC + 1)}`);
         yield* this.noop_loop(3);
 
         let address = undefined;
@@ -1061,6 +1033,7 @@ export class Cpu2A03 {
     // RTS - Return from Subroutine
     * processInstruction_RTS(): Instruction {
         this.register_PC = this.popStack16() + 1;
+        //console.log(`RTS ${numberToHex(this.register_PC)}`);
         yield* this.noop_loop(4);
     }
 

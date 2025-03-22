@@ -1,5 +1,5 @@
 import { Cartridge } from "./cartridge";
-import { Cpu2A03 } from "./cpu_2A03";
+import { Cpu2A03, InstructionResult } from "./cpu_2A03";
 import { RAM } from "./ram";
 import { PPU } from "./ppu";
 import { numberToHex } from "../emulator/utils";
@@ -13,6 +13,7 @@ export class Nes {
     private apu: APU;
 
     private logger: (message: string) => void;
+    private instructionLogger: (instruction: InstructionResult) => void;
     private onRenderedPixel: (x: number, y: number, finalColor: number[]) => void;
 
     public cycles: number = 0;
@@ -24,11 +25,15 @@ export class Nes {
     _isPaused: any;
     breakOnNmi: boolean = false;
 
-    constructor(logger: (message: string) => void, onRenderedPixel: (current_dot: number, current_scanline: number, finalColor: number[]) => void) {
+    constructor(logger: (message: string) => void,
+        instructionLogger: (instruction: InstructionResult) => void,
+        onRenderedPixel: (current_dot: number, current_scanline: number, finalColor: number[]) => void) {
         this.logger = logger;
+        this.instructionLogger = instructionLogger;
         this.onRenderedPixel = onRenderedPixel;
         this.cpu = new Cpu2A03(this);
         this.cartridge = new Cartridge(this);
+        this.ram = new RAM(this, 2048);
         this.ram = new RAM(this, 2048);
         this.ppu = new PPU(this);
         this.apu = new APU(this);
@@ -70,11 +75,15 @@ export class Nes {
         this.logger(message);
     }
 
+    logInstruction(instruction: InstructionResult) {
+        this.instructionLogger(instruction);
+    }
+
     onReset() {
         this.cpu.onReset();
         this.ppu.onReset();
         this.apu.onReset();
-        this.cycles = 6;
+        this.cycles = 0;
     }
 
     clock(step: boolean = false) {
@@ -83,13 +92,13 @@ export class Nes {
         }
 
         for (let i = 0; i < 3; i++) {
+            this.cycles++;
 
             this.ppu.clock();
 
             if (i == 2) {
                 this.cpu.clock();
             }
-            this.cycles++;
         }
     }
 

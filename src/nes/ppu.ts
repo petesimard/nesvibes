@@ -7,6 +7,7 @@ export class PPU implements BusDevice {
 
     private vram: Uint8Array = new Uint8Array(2048); // 2KB for nametables
     private oam: Uint8Array = new Uint8Array(256); // 256 bytes for OAM
+    private colorBuffer: number[] = [0, 0, 0, 255];
 
     register_PPUCTRL: number = 0;
     register_PPUMASK: number = 0;
@@ -27,7 +28,7 @@ export class PPU implements BusDevice {
     register_internal_nametableEntry: number = 0;
     register_internal_attributetableEntry: number = 0;
 
-    isEvenFrame: boolean = false;
+    frame_counter: number = 0;
     current_scanline: number = 0;
     current_dot: number = 0;
     preRenderScanlineHit: boolean = false;
@@ -105,7 +106,17 @@ export class PPU implements BusDevice {
     }
 
     write_internal(address: number, value: number): void {
-        this.vram[address] = value;
+        if (address < 0x0000 || address > 0x3FFF) {
+            throw new Error("PPU write_internal: Invalid address " + numberToHex(address));
+        }
+
+        if (address >= 0x2000 && address <= 0x3FFF) {
+            this.vram[address - 0x2000] = value;
+
+        }
+        else {
+            throw new Error("PPU write_internal: Invalid address " + numberToHex(address));
+        }
     }
 
     read(address: number): number {
@@ -155,10 +166,10 @@ export class PPU implements BusDevice {
 
     write(address: number, value: number): void {
         address = 0x2000 + (address & 0x0007);
-
         //console.log("PPU write", numberToHex(address), numberToHex(value));
 
         if (address == this.register_address_PPUCTRL) {
+            //console.log(`PPUCTRL ${numberToHex(value)} ${this.isInInitialReset() ? 'Initial Reset' : 'Not Initial Reset'}`);
             if (!this.isInInitialReset()) {
                 this.setPPUCTRL(value);
             }
@@ -197,21 +208,27 @@ export class PPU implements BusDevice {
             if (!this.isInInitialReset()) {
                 this.register_PPUADDR = value;
                 if (this.register_internal_W == 0) {
-                    this.register_internal_T = (this.register_internal_T & 0x40FF) | (value & 0x3F) << 8;
+                    this.register_internal_T = (this.register_internal_T & 0xFF) | ((value & 0x3F) << 8);
                     this.register_internal_T &= 0x3FFF; // Clear bit 15
+                    //console.log(`PPUADDR ${numberToHex(this.register_internal_V)} HIGH = ${numberToHex((value & 0x3F))}`);
                 }
                 else {
-                    this.register_internal_T = (this.register_internal_T & 0xFF) | (value & 0x3F) << 8;
+                    this.register_internal_T = (this.register_internal_T & 0xFF00) | value;
                     this.register_internal_V = this.register_internal_T;
-
+                    //console.log(`PPUADDR ${numberToHex(this.register_internal_V)}`);
                 }
                 this.register_internal_W = (this.register_internal_W == 1 ? 0 : 1);
             }
         }
         else if (address == this.register_address_PPUDATA) {
             this.write_internal(this.register_internal_V, value);
-            //console.log(`write_PPUDATA ${numberToHex(this.register_internal_V)} ${numberToHex(value)}`);
+
+            // if (value == 0x2A) {
+            //     console.log(`write_PPUDATA ${numberToHex(this.register_internal_V)} ${numberToHex(value)}`);
+            //     this.nes.getCpu().debug_break_on_next_instruction = true;
+            // }
             this.register_internal_V += (this.register_PPUCTRL & this.flags_PPUCTRL_VRAM_ADDRESS_INCREMENT) != 0 ? 32 : 1;
+            //console.log(`PPUDATA WRITE AT ${numberToHex(this.register_internal_V)}`);
         }
         else if (address == this.register_address_OAMDMA) {
             this.register_OAMDMA = value;
@@ -308,7 +325,7 @@ export class PPU implements BusDevice {
             if (this.current_scanline == 241 && this.current_dot == 1) {
                 this.register_PPUSTATUS |= this.flags_PPUSTATUS_VBLANK;
 
-                if ((this.register_PPUCTRL & this.flags_PPUCTRL_NMI_ENABLE) != 0) {
+                if ((this.register_PPUCTRL & this.flags_PPUCTRL_NMI_ENABLE) != 0 && this.nes.cycles >= 29658) {
                     // Trigger NMI from VBlank
                     this.nes.NMI();
                 }
@@ -343,7 +360,7 @@ export class PPU implements BusDevice {
             }
         }
 
-        if (this.current_scanline == 261 && !this.isEvenFrame && this.current_dot == 339 && this.isRenderingEnabled()) {
+        if (this.current_scanline == 261 && this.frame_counter % 2 == 1 && this.current_dot == 339 && this.isRenderingEnabled()) {
             // odd frame skip last dots
             this.current_dot = 0;
             this.current_scanline++;
@@ -361,7 +378,7 @@ export class PPU implements BusDevice {
                 // End of frame
                 this.current_scanline = 0;
                 this.current_dot = 0;
-                this.isEvenFrame = !this.isEvenFrame;
+                this.frame_counter++;
             }
         }
 
@@ -485,47 +502,38 @@ export class PPU implements BusDevice {
     }
 
     private bitsToColor(value: number) {
-        let finalColor = [];
 
         if (value == 0) {
-            finalColor = [
-                0,
-                0,
-                0,
-                255
-            ];
+            this.colorBuffer[0] = 0;
+            this.colorBuffer[1] = 0;
+            this.colorBuffer[2] = 0;
+            this.colorBuffer[3] = 255;
         }
         else if (value == 1) {
-            finalColor = [
-                255,
-                0,
-                0,
-                255
-            ];
+            this.colorBuffer[0] = 255;
+            this.colorBuffer[1] = 0;
+            this.colorBuffer[2] = 0;
+            this.colorBuffer[3] = 255;
         }
         else if (value == 2) {
-            finalColor = [
-                0,
-                255,
-                0,
-                255
-            ];
+            this.colorBuffer[0] = 0;
+            this.colorBuffer[1] = 255;
+            this.colorBuffer[2] = 0;
+            this.colorBuffer[3] = 255;
         }
         else {
-            finalColor = [
-                0,
-                0,
-                255,
-                255
-            ];
+            this.colorBuffer[0] = 0;
+            this.colorBuffer[1] = 0;
+            this.colorBuffer[2] = 255;
+            this.colorBuffer[3] = 255;
         }
-        return finalColor;
+        return this.colorBuffer;
     }
 
     onReset() {
         this.register_PPUCTRL = 0;
         this.register_PPUMASK = 0;
-        this.isEvenFrame = true;
+        this.frame_counter = 0;
         this.register_PPUSCROLL = 0;
         this.register_OAMDMA = 0;
         this.current_scanline = 0;

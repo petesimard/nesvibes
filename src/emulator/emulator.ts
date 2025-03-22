@@ -2,6 +2,8 @@ import P5 from "p5";
 import { Nes } from "../nes/nes";
 import { numberToHex } from "./utils";
 import p5 from "p5";
+import { InstructionResult } from "../nes/cpu_2A03";
+import { AddressingMode } from "../nes/2A03_instruction_map";
 
 
 // Download test log from logs/nestest.log
@@ -22,8 +24,7 @@ async function downloadTestLog() {
 //const testLog = await downloadTestLog();
 //const logLines = testLog.split('\n');
 const logContainer = document.getElementById('log-container');
-const line = document.createElement('p');
-logContainer!.appendChild(line);
+const line = document.getElementById('log-line');
 const stackContainer = document.getElementById('stack-container');
 const patternTable0 = document.getElementById('pattern-table-0') as HTMLCanvasElement;
 const patternTable1 = document.getElementById('pattern-table-1') as HTMLCanvasElement;
@@ -36,7 +37,7 @@ const pauseResumeButton = document.getElementById('pause-resume');
 const resetButton = document.getElementById('reset') as HTMLButtonElement;
 const stepButton = document.getElementById('step') as HTMLButtonElement;
 const logMessages: string[] = [];
-
+const instructionLogMessages: InstructionResult[] = [];
 
 export class NesVibes {
     private p5: P5;
@@ -74,7 +75,7 @@ export class NesVibes {
                 return;
 
             logMessages.push(message);
-            if (logMessages.length > 20000) {
+            if (logMessages.length > 100000) {
                 logMessages.shift();
             }
 
@@ -82,7 +83,16 @@ export class NesVibes {
                 return;
 
             this.updateLogWindow();
-        }, onRenderedPixel);
+        },
+            (instruction: InstructionResult) => {
+                instructionLogMessages.push(instruction);
+
+                if (instructionLogMessages.length > 20000) {
+                    instructionLogMessages.shift();
+                }
+            },
+
+            onRenderedPixel);
 
         this.currentRenderedFrame = this.p5.createImage(256, 240);
         this.nextRenderedFrame = this.p5.createImage(256, 240);
@@ -119,6 +129,8 @@ export class NesVibes {
         if (resetButton) {
             resetButton.addEventListener('click', () => {
                 this.nes.onReset();
+                logMessages.length = 0;
+                this.updateLogWindow();
             });
         }
 
@@ -142,8 +154,57 @@ export class NesVibes {
         this.updatePatternTables();
     }
 
+    private instructionResultToLogMessage(instructionResult: InstructionResult): string {
+        let instructionTargetAddress = '';
+
+        //CFEA  A1 80     LDA ($80,X) @ 83 = 0303 = 5C    A:5B X:03 Y:69 P:25 SP:FB PPU: 22,217 CYC:2573
+
+        if (instructionResult.target_address != undefined) {
+            if (instructionResult.instructionMetadata?.mode == AddressingMode.IndirectX || instructionResult.instructionMetadata?.mode == AddressingMode.IndirectY) {
+                instructionTargetAddress += '($' + numberToHex(instructionResult.indirectOffsetBase!) + ',';
+                if (instructionResult.instructionMetadata?.mode == AddressingMode.IndirectX)
+                    instructionTargetAddress += 'X)';
+                else
+                    instructionTargetAddress += 'Y)';
+
+                instructionTargetAddress += ' @ ' + numberToHex(instructionResult.indirectOffset!);
+                instructionTargetAddress += ' = ' + numberToHex(instructionResult.target_address!).padStart(4, '0');
+            }
+            else {
+
+                if (instructionResult.instructionMetadata?.mode == AddressingMode.Immediate)
+                    instructionTargetAddress += '#' + instructionTargetAddress;
+
+                instructionTargetAddress += '$' + numberToHex(instructionResult.target_address!);
+            }
+        }
+
+        // pad the instruction bytes to 3 characters
+        let instructionBytesString = instructionResult.instructionBytes.map(b => numberToHex(b)).join(" ");
+        instructionBytesString = instructionBytesString.padEnd(9, ' ');
+
+        let decodedInstruction = instructionResult.instructionMetadata?.name + ' ' + instructionTargetAddress;
+
+        if (instructionResult.target_address_memory != undefined) {
+            decodedInstruction += ' = ' + numberToHex(instructionResult.target_address_memory);
+        }
+        decodedInstruction = decodedInstruction.padEnd(31, ' ');
+
+        const result = `${numberToHex(instructionResult.register_PC).toString().padEnd(5, ' ')} ${instructionBytesString} ${decodedInstruction} A:${numberToHex(instructionResult.register_A)} X:${numberToHex(instructionResult.register_X)} Y:${numberToHex(instructionResult.register_Y)} P:${numberToHex(instructionResult.status_flags)} SP:${numberToHex(instructionResult.register_SP)} PPU:${instructionResult.ppu_scanline.toString().padStart(3, ' ')},${instructionResult.ppu_dot.toString().padStart(3, ' ')} CYC:${instructionResult.cycles}`;
+
+        return result;
+
+    }
+
     private updateLogWindow() {
-        line.textContent = logMessages.join('\n');
+
+        logMessages.length = 0;
+
+        instructionLogMessages.forEach(instruction => {
+            logMessages.push(this.instructionResultToLogMessage(instruction));
+        });
+
+        line!.textContent = logMessages.join('\n');
         logContainer!.scrollTop = logContainer!.scrollHeight;
     }
 
@@ -165,7 +226,7 @@ export class NesVibes {
 
             ctx3!.putImageData(this.nes.getPpu().getNameTableImage(0), 0, 0);
 
-            for (let i = 0; i < 10000; i++) {
+            for (let i = 0; i < 100000; i++) {
                 try {
                     this.nes.clock();
                 } catch (error) {
