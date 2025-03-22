@@ -181,7 +181,7 @@ export class PPU implements BusDevice {
             }
         }
         else if (address == this.register_address_PPUSTATUS) {
-            this.register_PPUSTATUS = value;
+            //this.register_PPUSTATUS = value;
         }
         else if (address == this.register_address_OAMADDR) {
             this.register_OAMADDR = value;
@@ -198,7 +198,8 @@ export class PPU implements BusDevice {
                     this.register_internal_X = (value & 0x07);
                 } else {
                     // Second write - Y scroll
-                    this.register_internal_T |= ((value & 0x07) << 12); // Fine Y scroll (3 bits)
+                    //FGH..ABCDE.....
+                    this.register_internal_T = (this.register_internal_T & 0xFFF) | ((value & 0x07) << 12); // Fine Y scroll (3 bits)
                     this.register_internal_T = (this.register_internal_T & 0x7C1F) | ((value >> 3) << 5); // Coarse Y scroll (5 bits)
                 }
                 this.register_internal_W = (this.register_internal_W == 1 ? 0 : 1);
@@ -256,7 +257,7 @@ export class PPU implements BusDevice {
             }
         }
 
-        this.register_internal_T = (this.register_internal_T & 0xE7FF) | (value & 0x3) << 10;
+        this.register_internal_T = (this.register_internal_T & 0xF3FF) | ((value & 0x3) << 10);
     }
 
     fetch_nametable(address: number): number {
@@ -293,7 +294,6 @@ export class PPU implements BusDevice {
             }
         }
 
-        //console.log(`fetch_nametable ${numberToHex(address)} ${isHorizontalMirroring ? 'Horizontal' : 'Vertical'} address ${numberToHex(address)}`);
         // Fetch from VRAM
         address -= 0x2000;
         return address;
@@ -454,10 +454,10 @@ export class PPU implements BusDevice {
             // Normal rendering
             if (((this.current_dot - 1) % 8) == 1) {
                 // Nametable byte
-                const tileAddress = 0x2000 + (this.register_internal_V & 0x0FFF);
+                const tileAddress = 0x2000 | (this.register_internal_V & 0x0FFF);
                 this.register_internal_nametableEntry = this.fetch_nametable(tileAddress);
-
-                //console.log(`Nametable byte ${numberToHex(this.register_internal_nametableEntry)} at ${numberToHex(tileAddress)} scanline ${this.current_scanline} dot ${this.current_dot}`);
+                //if (tileAddress == 0x2861)
+                //    console.log(`Nametable byte ${numberToHex(this.register_internal_nametableEntry)} at ${numberToHex(tileAddress)} scanline ${this.current_scanline} dot ${this.current_dot}`);
             }
             else if (((this.current_dot - 1) % 8) == 3) {
                 // Attribute table byte
@@ -632,4 +632,18 @@ export class PPU implements BusDevice {
 
         return image;
     }
+
+    xScroll(): number {
+        return ((this.register_internal_V & 0x001F) * 8) + this.register_internal_X;
+    }
+
+    yScroll(): number {
+        // Get coarse Y scroll (5 bits)
+        const coarseY = (this.register_internal_V & 0x03E0) >> 5;
+        // Get fine Y scroll (3 bits)
+        const fineY = (this.register_internal_V & 0x7000) >> 12;
+        // Combine coarse and fine Y to get scanline number
+        return (coarseY * 8) + fineY;
+    }
+
 }

@@ -265,6 +265,7 @@ export class NesVibes {
         const regPC = document.getElementById('reg-pc');
         const regCycles = document.getElementById('reg-cycles');
 
+
         if (regA) regA.textContent = numberToHex(this.nes.getCpu().getA());
         if (regX) regX.textContent = numberToHex(this.nes.getCpu().getX());
         if (regY) regY.textContent = numberToHex(this.nes.getCpu().getY());
@@ -272,6 +273,26 @@ export class NesVibes {
         if (regSP) regSP.textContent = numberToHex(this.nes.getCpu().getSP());
         if (regPC) regPC.textContent = numberToHex(this.nes.getCpu().getPC());
         if (regCycles) regCycles.textContent = this.nes.getCpu().getCycles().toString();
+
+        const regPPUCTRL = document.getElementById('reg-ppuctrl');
+        const regPPUMASK = document.getElementById('reg-ppumask');
+        const regPPUSTATUS = document.getElementById('reg-ppustatus');
+        const regPPU_T = document.getElementById('reg-ppu_t');
+        const regPPU_V = document.getElementById('reg-ppu_v');
+        const regPPU_Scanline = document.getElementById('reg-ppu_scanline');
+        const regPPU_Dot = document.getElementById('reg-ppu_dot');
+        const regPPU_XScroll = document.getElementById('reg-ppu_xscroll');
+        const regPPU_YScroll = document.getElementById('reg-ppu_yscroll');
+
+        if (regPPUCTRL) regPPUCTRL.textContent = numberToHex(this.nes.getPpu().register_PPUCTRL);
+        if (regPPUMASK) regPPUMASK.textContent = numberToHex(this.nes.getPpu().register_PPUMASK);
+        if (regPPUSTATUS) regPPUSTATUS.textContent = numberToHex(this.nes.getPpu().register_PPUSTATUS);
+        if (regPPU_T) regPPU_T.textContent = numberToHex(this.nes.getPpu().register_internal_T);
+        if (regPPU_V) regPPU_V.textContent = numberToHex(this.nes.getPpu().register_internal_V);
+        if (regPPU_Scanline) regPPU_Scanline.textContent = this.nes.getPpu().current_scanline.toString();
+        if (regPPU_Dot) regPPU_Dot.textContent = this.nes.getPpu().current_dot.toString();
+        if (regPPU_XScroll) regPPU_XScroll.textContent = this.nes.getPpu().xScroll().toString();
+        if (regPPU_YScroll) regPPU_YScroll.textContent = this.nes.getPpu().yScroll().toString();
 
         if (stackContainer) {
             const stackStart = 0x01FF;

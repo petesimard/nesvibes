@@ -193,7 +193,7 @@ export class Nes {
 
     NMI() {
         this.cpu.NMI();
-        console.log("NMI");
+        //console.log("NMI");
 
         if (this.breakOnNmi) {
             console.log("Break on NMI");

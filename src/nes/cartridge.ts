@@ -63,7 +63,7 @@ export class Cartridge implements BusDevice {
     }
 
     public isHorizontalMirroring(): boolean {
-        return (this.flags6 & 1) == 1;
+        return (this.flags6 & 1) == 0;
     }
 
     loadROM(rom: Uint8Array) {
