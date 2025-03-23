@@ -312,10 +312,6 @@ export class PPU implements BusDevice {
         return address;
     }
 
-    fetch_attribute_table(address: number): number {
-        address -= 0x2000;
-        return this.vram[address];
-    }
 
     clock() {
         if (this.current_scanline >= 0 && this.current_scanline <= 239) {
@@ -476,7 +472,17 @@ export class PPU implements BusDevice {
             else if (((this.current_dot - 1) % 8) == 3) {
                 // Attribute table byte
                 const atTableAddress = 0x23C0 | (this.register_internal_V & 0x0C00) | ((this.register_internal_V >> 4) & 0x38) | ((this.register_internal_V >> 2) & 0x07);
-                this.register_internal_attributetableEntry = this.fetch_attribute_table(atTableAddress);
+                const attributeByte = this.read_internal(atTableAddress);
+
+                //(v & 2) is the bit that decides horizontal quadrant.
+                //(v & 64) is the bit that decides vertical quadrant.
+                const horizontalQuadrant = (this.register_internal_V & 2) == 0 ? 0 : 1;
+                const verticalQuadrant = (this.register_internal_V & 64) == 0 ? 0 : 1;
+
+                const atrBitsIndex = (verticalQuadrant << 1) | horizontalQuadrant;
+
+                const attributeBits = attributeByte >> (atrBitsIndex * 2);
+                this.register_internal_attributetableEntry = attributeBits & 0x3;
             }
             else if (((this.current_dot - 1) % 8) == 5) {
                 // Pattern table low byte
