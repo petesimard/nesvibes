@@ -183,6 +183,9 @@ export class Nes {
         else if (address >= 0x2000 && address <= 0x3FFF) {
             this.ppu.write(address, value);
         }
+        else if (address == 0x4014) {
+            this.cpu.setOAMDMA(value);
+        }
         else if (address >= 0x4000 && address <= 0x4017) {
             this.apu.write(address, value);
         }

@@ -27,6 +27,7 @@ export class InstructionResult {
 }
 
 export class Cpu2A03 {
+
     nes: Nes;
 
     cpuCycles: number = 0;
@@ -36,6 +37,7 @@ export class Cpu2A03 {
     register_X: number = 0x00;
     register_Y: number = 0x00;
     register_A: number = 0x00;
+    register_OAMDMA: number | undefined = undefined;
 
 
     FLAG_CARRY: number = 1 << 0;
@@ -72,6 +74,7 @@ export class Cpu2A03 {
         this.register_PC = this.nes.read16(0xFFFC);
         this.instruction = undefined;
         this.cpuCycles = 0;
+        this.register_OAMDMA = undefined;
         //this.register_PC = 0x6000;
         console.log(`Initial PC: ${numberToHex(this.register_PC)}`);
     }
@@ -98,6 +101,10 @@ export class Cpu2A03 {
         if (this.pendingNonMaskableInterruptFlag) {
             this.pendingNonMaskableInterruptFlag = false;
             this.instruction = this.ExecuteNMI();
+            this.logInstruction(0x00);
+        }
+        else if (this.register_OAMDMA != undefined) {
+            this.instruction = this.ExecuteOAMDMA();
             this.logInstruction(0x00);
         }
         else {
@@ -136,6 +143,11 @@ export class Cpu2A03 {
                 throw new Error("Breakpoint reached");
             }
         }
+    }
+
+    setOAMDMA(value: number) {
+        this.register_OAMDMA = value;
+        this.nes.log(`OAMDMA: ${numberToHex(value)}`);
     }
 
     private advancePC() {
@@ -193,6 +205,22 @@ export class Cpu2A03 {
         this.instructionResult.status_flags = this.status_flags;
         this.instructionResult.ppu_scanline = this.nes.getPpu().current_scanline;
         this.instructionResult.ppu_dot = this.nes.getPpu().current_dot;
+    }
+
+    * ExecuteOAMDMA(): Instruction {
+        yield;
+
+        let baseAddress = this.register_OAMDMA! << 8;
+
+        for (let i = 0; i < 256; i++) {
+            const address = baseAddress + i;
+            const value = this.nes.read(address);
+            yield;
+            this.nes.write(this.nes.getPpu().register_address_OAMDATA, value);
+            yield;
+        }
+
+        this.register_OAMDMA = undefined;
     }
 
 

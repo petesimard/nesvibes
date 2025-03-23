@@ -163,6 +163,10 @@ export class NesVibes {
             breakNmi.addEventListener('change', () => {
                 this.nes.toggleBreakOnNmi(breakNmi.checked);
             });
+
+            if (breakNmi.checked) {
+                this.nes.toggleBreakOnNmi(true);
+            }
         }
 
         if (breakRti) {

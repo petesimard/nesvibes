@@ -7,9 +7,15 @@ export class PPU implements BusDevice {
     private nes: Nes;
 
     private vram: Uint8Array = new Uint8Array(2048); // 2KB for nametables
-    private oam: Uint8Array = new Uint8Array(256); // 256 bytes for OAM
+    private OAM: Uint8Array = new Uint8Array(256); // 256 bytes for OAM
+    private secondaryOAM: Uint8Array = new Uint8Array(32); // 32 bytes for secondary OAM
     private palette: Uint8Array = new Uint8Array(32);
     private colorBuffer: number[] = [0, 0, 0, 255];
+
+    private sprites_tiles_low: number[] = [];
+    private sprites_tiles_high: number[] = [];
+    private sprites_tiles_attributes: number[] = [];
+    private sprites_xPos: number[] = [];
 
     register_PPUCTRL: number = 0;
     register_PPUMASK: number = 0;
@@ -17,7 +23,6 @@ export class PPU implements BusDevice {
     register_OAMADDR: number = 0;
     register_PPUSCROLL: number = 0;
     register_PPUADDR: number = 0;
-    register_OAMDMA: number = 0;
 
     register_internal_V: number = 0;
     register_internal_T: number = 0;
@@ -74,7 +79,8 @@ export class PPU implements BusDevice {
     latched_tileLow: number = 0;
     latched_tileHigh: number = 0;
     latched_attributeTable: number = 0;
-
+    internal_oam_N: number = 0;
+    internal_oam_M: number = -1;
 
     constructor(nes: Nes) {
         this.nes = nes;
@@ -88,7 +94,6 @@ export class PPU implements BusDevice {
         this.register_OAMADDR = 0;
         this.register_PPUSCROLL = 0;
         this.register_PPUADDR = 0;
-        this.register_OAMDMA = 0;
     }
 
     isInInitialReset(): boolean {
@@ -160,7 +165,7 @@ export class PPU implements BusDevice {
             return this.register_OAMADDR;
         }
         else if (address == this.register_address_OAMDATA) {
-            return this.oam[this.register_OAMADDR];
+            return this.OAM[this.register_OAMADDR];
         }
         else if (address == this.register_address_PPUSCROLL) {
             return this.register_PPUSCROLL;
@@ -173,9 +178,6 @@ export class PPU implements BusDevice {
             this.ppuDataBuffer = this.read_internal(this.register_internal_V);
             this.register_internal_V += (this.register_PPUCTRL & this.flags_PPUCTRL_VRAM_ADDRESS_INCREMENT) != 0 ? 32 : 1;
             return result;
-        }
-        else if (address == this.register_address_OAMDMA) {
-            return this.register_OAMDMA;
         }
         else {
             throw new Error("PPU read: Invalid address " + numberToHex(address));
@@ -205,7 +207,7 @@ export class PPU implements BusDevice {
             this.register_OAMADDR = value;
         }
         else if (address == this.register_address_OAMDATA) {
-            this.oam[this.register_OAMADDR] = value;
+            this.OAM[this.register_OAMADDR] = value;
             this.register_OAMADDR++;
         }
         else if (address == this.register_address_PPUSCROLL) {
@@ -243,9 +245,6 @@ export class PPU implements BusDevice {
             this.write_internal(this.register_internal_V, value);
             this.register_internal_V += (this.register_PPUCTRL & this.flags_PPUCTRL_VRAM_ADDRESS_INCREMENT) != 0 ? 32 : 1;
             //console.log(`PPUDATA WRITE AT ${numberToHex(this.register_internal_V)}`);
-        }
-        else if (address == this.register_address_OAMDMA) {
-            this.register_OAMDMA = value;
         }
     }
 
@@ -317,8 +316,13 @@ export class PPU implements BusDevice {
         if (this.current_scanline >= 0 && this.current_scanline <= 239) {
             // Visible scanlines
 
+            if (this.current_dot >= 257 && this.current_dot <= 320) {
+                this.loadSpriteTiles();
+            }
+
             if (this.isRenderingEnabled()) {
                 // Rendering enabled
+                this.processSprites();
                 this.renderScanline();
             }
 
@@ -457,6 +461,54 @@ export class PPU implements BusDevice {
         }
     }
 
+    loadSpriteTiles() {
+        const spriteCycle = (this.current_dot - 1) % 8;
+
+        if (spriteCycle == 7) {
+            const spriteNumber = (this.current_dot - 257) >> 3;
+
+            const y = this.secondaryOAM[spriteNumber * 4];
+            let tile = this.secondaryOAM[spriteNumber * 4 + 1];
+            const attribute = this.secondaryOAM[spriteNumber * 4 + 2];
+            const x = this.secondaryOAM[spriteNumber * 4 + 3];
+
+            if (tile == 0xFF) {
+                this.sprites_xPos[spriteNumber] = -1;
+                return;
+            }
+
+            this.sprites_xPos[spriteNumber] = x;
+            this.sprites_tiles_attributes[spriteNumber] = attribute;
+
+            let patternTableNumber = 0;
+            if ((this.register_PPUCTRL & this.flags_PPUCTRL_SPRITE_SIZE) != 0) {
+                // 8x16 sprites
+                patternTableNumber = tile & 0x01;
+                tile = tile >> 1;
+            }
+            else {
+                patternTableNumber = (this.register_PPUCTRL & this.flags_PPUCTRL_SPRITE_PATTERN_TABLE_ADDRESS) != 0 ? 1 : 0;
+            }
+
+            const patternPatternTableAddress = patternTableNumber == 0 ? this.address_PATTERNTABLE_0 : this.address_PATTERNTABLE_1;
+            let fineY = this.current_scanline - y;
+
+            if ((attribute & 0x80) != 0) {
+                fineY = 7 - fineY;
+            }
+
+            //console.log(`spriteNumber ${spriteNumber} fineY ${fineY} yScroll ${this.yScroll()} y ${y} tile ${tile} patternTableNumber ${patternTableNumber} patternPatternTableAddress ${patternPatternTableAddress}`);
+
+            const patternTableLowAddress = patternPatternTableAddress + (tile * 16) + fineY;
+            this.sprites_tiles_low[spriteNumber] = this.nes.getCartridge().ppu_read(patternTableLowAddress);
+
+            const patternTableHighAddress = patternPatternTableAddress + (tile * 16) + fineY + 8;
+            this.sprites_tiles_high[spriteNumber] = this.nes.getCartridge().ppu_read(patternTableHighAddress);
+
+        }
+
+    }
+
     private doMemoryFetches() {
         if (this.current_dot == 0) {
             // Idle
@@ -472,7 +524,7 @@ export class PPU implements BusDevice {
             else if (((this.current_dot - 1) % 8) == 3) {
                 // Attribute table byte
                 const atTableAddress = 0x23C0 | (this.register_internal_V & 0x0C00) | ((this.register_internal_V >> 4) & 0x38) | ((this.register_internal_V >> 2) & 0x07);
-                const attributeByte = this.read_internal(atTableAddress);
+                const attributeByte = this.read_internal(atTableAddress); arguments
 
                 //(v & 2) is the bit that decides horizontal quadrant.
                 //(v & 64) is the bit that decides vertical quadrant.
@@ -505,6 +557,7 @@ export class PPU implements BusDevice {
     }
 
     renderPixel() {
+        // Background
         const pixelX = ((this.current_dot - 1) % 8) + this.register_internal_X;
 
         const attributeBits = (pixelX & 0x8) == 0 ?
@@ -512,18 +565,72 @@ export class PPU implements BusDevice {
             this.latched_attributeTable & 0x3;
 
 
-        let lowBit = (this.latched_tileLow & (1 << (15 - pixelX))) != 0 ? 1 : 0;
-        let highBit = (this.latched_tileHigh & (1 << (15 - pixelX))) != 0 ? 1 : 0;
+        let tile_lowBit = (this.latched_tileLow & (1 << (15 - pixelX))) != 0 ? 1 : 0;
+        let tile_highBit = (this.latched_tileHigh & (1 << (15 - pixelX))) != 0 ? 1 : 0;
 
         if (this.current_dot <= 8 && (this.register_PPUMASK & this.flags_PPUMASK_SHOW_BACKGROUND_IN_LEFT_8) == 0) {
-            lowBit = 0;
-            highBit = 0;
+            tile_lowBit = 0;
+            tile_highBit = 0;
         }
 
-        const patternBits = lowBit | (highBit << 1);
+        const tile_patternBits = tile_lowBit | (tile_highBit << 1);
+        let selectedSprite = -1;
+        let sprite_patternBits = 0;
+        let sprite_attributes = 0;
+        // Sprites
+        for (let i = 0; i < 8; i++) {
+            const sprite_xPos = this.sprites_xPos[i];
+            if (sprite_xPos == -1) {
+                continue;
+            }
 
-        const patternIndex = patternBits | (attributeBits << 2);
-        const paletteAddress = 0x3F00 | patternIndex;
+            let spriteFineX = (this.current_dot - 1) - sprite_xPos;
+
+            if (spriteFineX >= 0 && spriteFineX <= 7) {
+                sprite_attributes = this.sprites_tiles_attributes[i];
+
+                if ((sprite_attributes & 0x40) != 0) {
+                    spriteFineX = 7 - spriteFineX;
+                }
+                //console.log(`spriteFineX ${spriteFineX} sprite_xPos ${sprite_xPos} xScroll ${this.xScroll()} yScroll ${this.yScroll()} sprite_attributes ${this.sprites_tiles_attributes[i]}`);
+                const sprite_tile_low = (this.sprites_tiles_low[i] & (1 << (7 - spriteFineX))) != 0 ? 1 : 0;
+                const sprite_tile_high = (this.sprites_tiles_high[i] & (1 << (7 - spriteFineX))) != 0 ? 1 : 0;
+
+                sprite_patternBits = sprite_tile_low | (sprite_tile_high << 1);
+                if (sprite_patternBits == 0) {
+                    // Sprite pixel is transparent
+                    continue;
+                }
+
+                if (tile_patternBits == 0) {
+                    // sprite is visible and background is transparent
+                    selectedSprite = i;
+                    break;
+                }
+
+                // Both visible
+                const isSpriteInFront = (sprite_attributes & 0x20) == 0;
+                if (isSpriteInFront) {
+                    selectedSprite = i;
+                    break;
+                }
+            }
+        }
+
+        let paletteIndex = 0;
+
+        if (selectedSprite != -1) {
+            // Draw sprite            
+            paletteIndex = sprite_patternBits | ((sprite_attributes & 0x3) << 2) | 0x10;
+
+        }
+        else {
+            // Draw background
+            paletteIndex = tile_patternBits | (attributeBits << 2);
+
+        }
+
+        const paletteAddress = 0x3F00 | paletteIndex;
         const palette = this.read_internal(paletteAddress);
 
         if (paletteAddress == undefined || palette == undefined) {
@@ -531,8 +638,8 @@ export class PPU implements BusDevice {
         }
 
         const finalColor = this.bitsToColor(palette);
-
         this.nes.setRenderedPixel(this.current_dot - 1, this.current_scanline, finalColor);
+
     }
 
     private bitsToColor(patternIndex: number) {
@@ -557,10 +664,13 @@ export class PPU implements BusDevice {
         this.register_PPUMASK = 0;
         this.frame_counter = 0;
         this.register_PPUSCROLL = 0;
-        this.register_OAMDMA = 0;
         this.current_scanline = 0;
         this.current_dot = 0;
         this.preRenderScanlineHit = false;
+
+        for (let i = 0; i < 32; i++) {
+            this.secondaryOAM[i] = 0xFF;
+        }
     }
 
     getPatternTableImage(table: number): ImageData {
@@ -668,4 +778,80 @@ export class PPU implements BusDevice {
         return (coarseY * 8) + fineY;
     }
 
+    processSprites() {
+        if (this.current_dot > 0 && this.current_dot <= 64 && (this.current_dot - 1) % 2 == 0) {
+            // Clear secondary OAM
+            const oamToClear = (this.current_dot - 1) >> 1;
+            this.secondaryOAM[oamToClear] = 0xFF;
+            this.internal_oam_N = 0;
+            this.internal_oam_M = -1;
+        }
+        else if (this.current_dot >= 321) {
+            // End of sprite evaluation
+        }
+        else if (this.current_dot >= 65 && this.current_dot <= 256) {
+            // Sprite evaluation
+
+            if (this.current_dot % 2 == 0) {
+                // Write on even dots
+                if (this.internal_oam_N < 64) {
+                    const spriteY = this.OAM[this.internal_oam_N * 4];
+
+                    if (this.internal_oam_M == -1) {
+                        // Havent filled all slots
+                        let secondaryOamIndex = -1;
+
+                        for (let m1 = 0; m1 < 8; m1++) {
+                            if (this.secondaryOAM[(m1 * 4) + 1] == 0xFF) {
+                                // Open slot
+                                secondaryOamIndex = m1;
+                                break;
+                            }
+                        }
+
+
+                        if (secondaryOamIndex != -1) {
+                            // Slot open
+                            this.secondaryOAM[secondaryOamIndex * 4] = this.OAM[this.internal_oam_N * 4];
+                            const isSpriteInRange = this.current_scanline >= spriteY && this.current_scanline <= spriteY + 7;
+                            if (isSpriteInRange) {
+                                // In range
+                                this.secondaryOAM[(secondaryOamIndex * 4) + 1] = this.OAM[(this.internal_oam_N * 4) + 1];
+                                this.secondaryOAM[(secondaryOamIndex * 4) + 2] = this.OAM[(this.internal_oam_N * 4) + 2];
+                                this.secondaryOAM[(secondaryOamIndex * 4) + 3] = this.OAM[(this.internal_oam_N * 4) + 3];
+                            }
+                        }
+                        else {
+                            this.internal_oam_M = 0;
+                            // No slots
+                        }
+
+                        this.internal_oam_N++;
+                    }
+                    else {
+                        // No open slot
+                        const spriteY = this.OAM[(this.internal_oam_N) * 4 + this.internal_oam_M];
+                        const isSpriteInRange = spriteY >= this.current_scanline && spriteY <= this.current_scanline + 7;
+
+                        if (isSpriteInRange) {
+                            // Overflow
+                            this.register_PPUSTATUS |= this.flags_PPUSTATUS_SPRITE_OVERFLOW;
+
+                            for (let i = 0; i < 3; i++) {
+                                this.internal_oam_M++;
+                                if (this.internal_oam_M == 3) {
+                                    this.internal_oam_M = 0;
+                                    this.internal_oam_N++;
+                                }
+                            }
+                        }
+                        else {
+                            this.internal_oam_M++;
+                            this.internal_oam_N++;
+                        }
+                    }
+                }
+            }
+        }
+    }
 }
