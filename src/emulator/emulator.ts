@@ -6,6 +6,10 @@ import { InstructionResult } from "../nes/cpu_2A03";
 import { AddressingMode } from "../nes/2A03_instruction_map";
 
 
+
+
+
+
 // Download test log from logs/nestest.log
 async function downloadTestLog() {
     try {
@@ -36,6 +40,27 @@ const breakCycle = document.getElementById('break-cycle') as HTMLInputElement;
 const pauseResumeButton = document.getElementById('pause-resume');
 const resetButton = document.getElementById('reset') as HTMLButtonElement;
 const stepButton = document.getElementById('step') as HTMLButtonElement;
+const paletteView = document.getElementById('palette-view');
+const paletteCells: HTMLDivElement[] = [];
+
+// Create 32 8x8 divs for palette view
+if (paletteView) {
+    paletteView.style.display = 'grid';
+    paletteView.style.gridTemplateColumns = 'repeat(4, 32px)';
+    paletteView.style.gap = '1px';
+
+    for (let i = 0; i < 32; i++) {
+        const paletteCell = document.createElement('div');
+        paletteCell.style.width = '32px';
+        paletteCell.style.height = '32px';
+        paletteCell.style.backgroundColor = '#000000';
+        paletteCell.style.border = '1px solid #222';
+        paletteView.appendChild(paletteCell);
+        paletteCells.push(paletteCell);
+    }
+}
+
+
 const logMessages: string[] = [];
 const instructionLogMessages: InstructionResult[] = [];
 
@@ -152,6 +177,7 @@ export class NesVibes {
         this.updateDebugDisplay();
         this.updateLogWindow();
         this.updatePatternTables();
+        this.updatePaletteView();
     }
 
     private instructionResultToLogMessage(instructionResult: InstructionResult): string {
@@ -254,6 +280,17 @@ export class NesVibes {
         ctx3.putImageData(this.nes.getPpu().getNameTableImage(0), 0, 0);
     }
 
+    updatePaletteView() {
+        if (!paletteView)
+            return;
+
+        for (let i = 0; i < 32; i++) {
+            const color = this.nes.getPpu().getPalette(i);
+            const bgColor = `rgb(${color[0]}, ${color[1]}, ${color[2]})`;
+            paletteCells[i].style.backgroundColor = bgColor;
+        }
+
+    }
 
     private updateDebugDisplay() {
 

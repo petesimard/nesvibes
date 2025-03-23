@@ -1,12 +1,14 @@
 import { BusDevice } from "../emulator/busdevice_interface";
 import { numberToHex } from "../emulator/utils";
 import { Nes } from "./nes";
+import { NES_PALETTE } from "./palettes/palette";
 
 export class PPU implements BusDevice {
     private nes: Nes;
 
     private vram: Uint8Array = new Uint8Array(2048); // 2KB for nametables
     private oam: Uint8Array = new Uint8Array(256); // 256 bytes for OAM
+    private palette: Uint8Array = new Uint8Array(32);
     private colorBuffer: number[] = [0, 0, 0, 255];
 
     register_PPUCTRL: number = 0;
@@ -68,8 +70,10 @@ export class PPU implements BusDevice {
     flags_PPUSTATUS_SPRITE_ZERO_HIT: number = 1 << 6;
     flags_PPUSTATUS_VBLANK: number = 1 << 7;
     ppuDataBuffer: number = 0;
+
     latched_tileLow: number = 0;
     latched_tileHigh: number = 0;
+    latched_attributeTable: number = 0;
 
 
     constructor(nes: Nes) {
@@ -99,6 +103,15 @@ export class PPU implements BusDevice {
         else if (address >= 0x2000 && address <= 0x2FFF) {
             return this.fetch_nametable(address);
         }
+        else if (address >= 0x2000 && address < 0x3F00) {
+            return this.vram[address - 0x2000];
+        }
+        else if (address >= 0x3F00 && address <= 0x3F1F) {
+            return this.palette[address - 0x3F00];
+        }
+        else if (address >= 0x3F20 && address <= 0x3FFF) {
+            return this.palette[(address - 0x3F20) % 0x20];
+        }
         else {
             throw new Error("PPU read_internal: Invalid address " + numberToHex(address));
         }
@@ -110,9 +123,14 @@ export class PPU implements BusDevice {
             throw new Error("PPU write_internal: Invalid address " + numberToHex(address));
         }
 
-        if (address >= 0x2000 && address <= 0x3FFF) {
+        if (address >= 0x2000 && address < 0x3F00) {
             this.vram[address - 0x2000] = value;
-
+        }
+        else if (address >= 0x3F00 && address <= 0x3F1F) {
+            this.palette[address - 0x3F00] = value;
+        }
+        else if (address >= 0x3F20 && address <= 0x3FFF) {
+            this.palette[(address - 0x3F20) % 0x20] = value;
         }
         else {
             throw new Error("PPU write_internal: Invalid address " + numberToHex(address));
@@ -223,11 +241,6 @@ export class PPU implements BusDevice {
         }
         else if (address == this.register_address_PPUDATA) {
             this.write_internal(this.register_internal_V, value);
-
-            // if (value == 0x2A) {
-            //     console.log(`write_PPUDATA ${numberToHex(this.register_internal_V)} ${numberToHex(value)}`);
-            //     this.nes.getCpu().debug_break_on_next_instruction = true;
-            // }
             this.register_internal_V += (this.register_PPUCTRL & this.flags_PPUCTRL_VRAM_ADDRESS_INCREMENT) != 0 ? 32 : 1;
             //console.log(`PPUDATA WRITE AT ${numberToHex(this.register_internal_V)}`);
         }
@@ -394,6 +407,8 @@ export class PPU implements BusDevice {
             // transfer tile to latched tile (aka shift register)
             this.latched_tileLow = ((this.latched_tileLow << 8) & 0xFF00) | this.register_internal_tileLow;
             this.latched_tileHigh = ((this.latched_tileHigh << 8) & 0xFF00) | this.register_internal_tileHigh;
+
+            this.latched_attributeTable = ((this.latched_attributeTable << 2) & 0xC) | this.register_internal_attributetableEntry;
         }
 
         if (this.current_dot >= 1 && this.current_dot <= 256 && this.isVisualScanline()) {
@@ -456,7 +471,6 @@ export class PPU implements BusDevice {
                 // Nametable byte
                 const tileAddress = 0x2000 | (this.register_internal_V & 0x0FFF);
                 this.register_internal_nametableEntry = this.fetch_nametable(tileAddress);
-                //if (tileAddress == 0x2861)
                 //    console.log(`Nametable byte ${numberToHex(this.register_internal_nametableEntry)} at ${numberToHex(tileAddress)} scanline ${this.current_scanline} dot ${this.current_dot}`);
             }
             else if (((this.current_dot - 1) % 8) == 3) {
@@ -485,7 +499,13 @@ export class PPU implements BusDevice {
     }
 
     renderPixel() {
-        const pixelX = (this.current_dot - 1) % 8;
+        const pixelX = ((this.current_dot - 1) % 8) + this.register_internal_X;
+
+        const attributeBits = (pixelX & 0x8) == 0 ?
+            this.latched_attributeTable >> 2 :
+            this.latched_attributeTable & 0x3;
+
+
         let lowBit = (this.latched_tileLow & (1 << (15 - pixelX))) != 0 ? 1 : 0;
         let highBit = (this.latched_tileHigh & (1 << (15 - pixelX))) != 0 ? 1 : 0;
 
@@ -494,40 +514,36 @@ export class PPU implements BusDevice {
             highBit = 0;
         }
 
-        const value = lowBit | (highBit << 1);
+        const patternBits = lowBit | (highBit << 1);
 
-        const finalColor = this.bitsToColor(value);
+        const patternIndex = patternBits | (attributeBits << 2);
+        const paletteAddress = 0x3F00 | patternIndex;
+        const palette = this.read_internal(paletteAddress);
+
+        if (paletteAddress == undefined || palette == undefined) {
+            console.log(`paletteAddress ${numberToHex(paletteAddress)} palette ${numberToHex(palette)}`);
+        }
+
+        const finalColor = this.bitsToColor(palette);
 
         this.nes.setRenderedPixel(this.current_dot - 1, this.current_scanline, finalColor);
     }
 
-    private bitsToColor(value: number) {
+    private bitsToColor(patternIndex: number) {
 
-        if (value == 0) {
-            this.colorBuffer[0] = 0;
-            this.colorBuffer[1] = 0;
-            this.colorBuffer[2] = 0;
-            this.colorBuffer[3] = 255;
-        }
-        else if (value == 1) {
-            this.colorBuffer[0] = 255;
-            this.colorBuffer[1] = 0;
-            this.colorBuffer[2] = 0;
-            this.colorBuffer[3] = 255;
-        }
-        else if (value == 2) {
-            this.colorBuffer[0] = 0;
-            this.colorBuffer[1] = 255;
-            this.colorBuffer[2] = 0;
-            this.colorBuffer[3] = 255;
-        }
-        else {
-            this.colorBuffer[0] = 0;
-            this.colorBuffer[1] = 0;
-            this.colorBuffer[2] = 255;
-            this.colorBuffer[3] = 255;
-        }
+        const color = NES_PALETTE[patternIndex];
+        this.colorBuffer[0] = color[0];
+        this.colorBuffer[1] = color[1];
+        this.colorBuffer[2] = color[2];
+
         return this.colorBuffer;
+    }
+
+    getPalette(i: number): number[] {
+        const paletteAddress = 0x3F00 | i;
+        const palette = this.read_internal(paletteAddress);
+
+        return this.bitsToColor(palette);
     }
 
     onReset() {
