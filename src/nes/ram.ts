@@ -1,5 +1,4 @@
 import { BusDevice } from "../emulator/busdevice_interface";
-import { numberToHex } from "../emulator/utils";
 import { Nes } from "./nes";
 
 export class RAM implements BusDevice {

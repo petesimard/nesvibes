@@ -15,6 +15,8 @@ export class Nes {
     private logger: (message: string) => void;
     private instructionLogger: (instruction: InstructionResult) => void;
     private onRenderedPixel: (x: number, y: number, finalColor: number[]) => void;
+    getControllerState: (controllerNumber: number) => number;
+    latchControllerStates: () => void;
 
     public cycles: number = 0;
     public onPausedListeners: (() => void)[] = [];
@@ -25,12 +27,18 @@ export class Nes {
     _isPaused: any;
     breakOnNmi: boolean = false;
 
+
     constructor(logger: (message: string) => void,
         instructionLogger: (instruction: InstructionResult) => void,
-        onRenderedPixel: (current_dot: number, current_scanline: number, finalColor: number[]) => void) {
+        onRenderedPixel: (current_dot: number, current_scanline: number, finalColor: number[]) => void,
+        latchControllerStates: () => void,
+        getControllerState: (controllerNumber: number) => number,
+    ) {
         this.logger = logger;
         this.instructionLogger = instructionLogger;
         this.onRenderedPixel = onRenderedPixel;
+        this.getControllerState = getControllerState;
+        this.latchControllerStates = latchControllerStates;
         this.cpu = new Cpu2A03(this);
         this.cartridge = new Cartridge(this);
         this.ram = new RAM(this, 2048);
@@ -144,6 +152,13 @@ export class Nes {
         else if (address >= 0x1800 && address <= 0x1FFF) {
             return this.ram.read(address - 0x1800);
         }
+        else if (address == 0x4016) {
+            const controllerState = this.getControllerState(0);
+            return controllerState;
+        }
+        else if (address == 0x4017) {
+            return 0;// this.getControllerState(1);
+        }
         else if (address >= 0x4020 && address <= 0xFFFF) {
             return this.cartridge.read(address);
         }
@@ -173,6 +188,11 @@ export class Nes {
         }
         else if (address >= 0x1800 && address <= 0x1FFF) {
             this.ram.write(address - 0x1800, value);
+        }
+        else if (address == 0x4016) {
+            if ((value & 1) == 0) {
+                this.latchControllerStates();
+            }
         }
         else if (address >= 0x4020 && address <= 0xFFFF) {
             this.cartridge.write(address, value);

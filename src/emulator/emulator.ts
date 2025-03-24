@@ -72,6 +72,10 @@ export class NesVibes {
     private currentRenderedFrame: p5.Image;
     private nextRenderedFrame: p5.Image;
 
+    controller1State: number = 0;
+    controller1LatchedState: number = 0;
+    controllerReadIndex: number = 0;
+
     constructor(scale: number = 1) {
         this.scale = scale;
 
@@ -92,6 +96,21 @@ export class NesVibes {
                 this.currentRenderedFrame.updatePixels();
                 this.nextRenderedFrame = oldFrame;
             }
+        }
+
+        document.addEventListener('keydown', this.handleKeyDown);
+        document.addEventListener('keyup', this.handleKeyUp);
+
+
+        const getControllerState = (controllerNumber: number): number => {
+            const result = (this.controller1LatchedState & (1 << this.controllerReadIndex)) != 0 ? 1 : 0;
+            this.controllerReadIndex++;
+            return result;
+        }
+
+        const latchControllerStates = (): void => {
+            this.controller1LatchedState = this.controller1State;
+            this.controllerReadIndex = 0;
         }
 
         this.p5 = new P5(sketch);
@@ -117,7 +136,10 @@ export class NesVibes {
                 }
             },
 
-            onRenderedPixel);
+            onRenderedPixel,
+            latchControllerStates,
+            getControllerState,
+        );
 
         this.currentRenderedFrame = this.p5.createImage(256, 240);
         this.nextRenderedFrame = this.p5.createImage(256, 240);
@@ -176,6 +198,7 @@ export class NesVibes {
         }
 
     }
+
 
     private updateDebug() {
         this.updateDebugDisplay();
@@ -357,4 +380,64 @@ export class NesVibes {
 
         this.nes.loadROM(uint8Array);
     }
+
+
+    private handleKeyDown = (event: KeyboardEvent) => {
+        switch (event.key.toLowerCase()) {
+            case 'p': // A
+                this.controller1State |= 0x1;
+                break;
+            case 'o': // B
+                this.controller1State |= 0x2;
+                break;
+            case '\\': // Select
+                this.controller1State |= 0x4;
+                break;
+            case 'enter': // Start
+                this.controller1State |= 0x8;
+                break;
+            case 'w': // Up
+                this.controller1State |= 0x10;
+                break;
+            case 's': // Down
+                this.controller1State |= 0x20;
+                break;
+            case 'a': // Left
+                this.controller1State |= 0x40;
+                break;
+            case 'd': // Right
+                this.controller1State |= 0x80;
+                break;
+        }
+    }
+
+    private handleKeyUp = (event: KeyboardEvent) => {
+        switch (event.key.toLowerCase()) {
+            case 'p': // A
+                this.controller1State &= ~0x1;
+                break;
+            case 'o': // B
+                this.controller1State &= ~0x2;
+                break;
+            case '\\': // Select
+                this.controller1State &= ~0x4;
+                break;
+            case 'enter': // Start
+                this.controller1State &= ~0x8;
+                break;
+            case 'w': // Up
+                this.controller1State &= ~0x10;
+                break;
+            case 's': // Down
+                this.controller1State &= ~0x20;
+                break;
+            case 'a': // Left
+                this.controller1State &= ~0x40;
+                break;
+            case 'd': // Right
+                this.controller1State &= ~0x80;
+                break;
+        }
+    }
+
 }
