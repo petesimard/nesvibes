@@ -4,14 +4,16 @@ import { RAM } from "./ram";
 import { PPU } from "./ppu";
 import { numberToHex } from "../emulator/utils";
 import { APU } from "./apu";
+import { CartridgeLoader } from "./cartridge_loader";
+
 export class Nes {
 
     private cpu: Cpu2A03;
-    private cartridge: Cartridge;
+    private cartridge: Cartridge | undefined;
     private ram: RAM;
     private ppu: PPU;
     private apu: APU;
-
+    private cartridgeLoader: CartridgeLoader;
     private logger: (message: string) => void;
     private instructionLogger: (instruction: InstructionResult) => void;
     private onRenderedPixel: (x: number, y: number, finalColor: number[]) => void;
@@ -40,11 +42,11 @@ export class Nes {
         this.getControllerState = getControllerState;
         this.latchControllerStates = latchControllerStates;
         this.cpu = new Cpu2A03(this);
-        this.cartridge = new Cartridge(this);
         this.ram = new RAM(this, 2048);
         this.ram = new RAM(this, 2048);
         this.ppu = new PPU(this);
         this.apu = new APU(this);
+        this.cartridgeLoader = new CartridgeLoader(this);
     }
 
     public isPaused(): boolean {
@@ -71,7 +73,11 @@ export class Nes {
         this.breakOnRti = value;
     }
 
-    getCartridge() {
+    getCartridge(): Cartridge {
+        if (!this.cartridge) {
+            throw new Error("Cartridge not loaded");
+        }
+
         return this.cartridge;
     }
 
@@ -117,8 +123,18 @@ export class Nes {
         }
     }
 
-    loadROM(rom: Uint8Array) {
-        this.cartridge.loadROM(rom);
+    async loadROM(romBytes: Uint8Array) {
+        const cartidge = await this.cartridgeLoader.loadCartridge(romBytes);
+        if (!cartidge) {
+            throw new Error("Failed to load ROM");
+        }
+
+        this.cartridge = cartidge;
+
+        if (!this.cartridge) {
+            throw new Error("Failed to load ROM 2");
+        }
+
     }
 
     isNormalAddress(address: number): boolean {
@@ -160,7 +176,7 @@ export class Nes {
             return 0;// this.getControllerState(1);
         }
         else if (address >= 0x4020 && address <= 0xFFFF) {
-            return this.cartridge.read(address);
+            return this.cartridge!.read(address);
         }
         else if (address == this.CPU_BUSADDRESS_REGISTER_A) {
             return this.cpu.register_A;
@@ -195,7 +211,7 @@ export class Nes {
             }
         }
         else if (address >= 0x4020 && address <= 0xFFFF) {
-            this.cartridge.write(address, value);
+            this.cartridge!.write(address, value);
         }
         else if (address == this.CPU_BUSADDRESS_REGISTER_A) {
             this.cpu.register_A = value;

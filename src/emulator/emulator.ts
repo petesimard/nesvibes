@@ -262,7 +262,7 @@ export class NesVibes {
     }
 
     async setup(rom: string) {
-        await this.loadROM(rom);
+        await this.loadROMFromURL(rom);
         this.nes.onReset();
 
         this.updatePatternTables();
@@ -373,12 +373,12 @@ export class NesVibes {
         }
     }
 
-    async loadROM(url: string) {
+    async loadROMFromURL(url: string) {
         const response = await fetch(url);
         const arrayBuffer = await response.arrayBuffer();
         const uint8Array = new Uint8Array(arrayBuffer);
 
-        this.nes.loadROM(uint8Array);
+        await this.nes.loadROM(uint8Array);
     }
 
 
