@@ -9,24 +9,6 @@ import { AddressingMode } from "../nes/2A03_instruction_map";
 
 
 
-
-// Download test log from logs/nestest.log
-async function downloadTestLog() {
-    try {
-        const response = await fetch('logs/nestest.log');
-        if (!response.ok) {
-            throw new Error(`HTTP error! status: ${response.status}`);
-        }
-        const text = await response.text();
-        return text;
-    } catch (error) {
-        console.error('Error downloading test log:', error);
-        return '';
-    }
-}
-
-//const testLog = await downloadTestLog();
-//const logLines = testLog.split('\n');
 const logContainer = document.getElementById('log-container');
 const line = document.getElementById('log-line');
 const stackContainer = document.getElementById('stack-container');
@@ -70,8 +52,7 @@ export class NesVibes {
     private scale: number;
     private nes: Nes;
 
-    private currentRenderedFrame: p5.Image;
-    private nextRenderedFrame: p5.Image;
+    private frameBufferImage: p5.Image;
 
     private lastFpsUpdate: number = 0;
     private cachedFps: number = 0;
@@ -94,17 +75,6 @@ export class NesVibes {
                 p5.frameRate(60);
             };
         };
-
-        const onRenderedPixel = (x: number, y: number, finalColor: number[]) => {
-            this.nextRenderedFrame.set(x, y, finalColor)
-
-            if (x == 255 && y == 239) {
-                const oldFrame = this.currentRenderedFrame;
-                this.currentRenderedFrame = this.nextRenderedFrame;
-                this.currentRenderedFrame.updatePixels();
-                this.nextRenderedFrame = oldFrame;
-            }
-        }
 
         document.addEventListener('keydown', this.handleKeyDown);
         document.addEventListener('keyup', this.handleKeyUp);
@@ -144,13 +114,11 @@ export class NesVibes {
                 }
             },
 
-            onRenderedPixel,
             latchControllerStates,
             getControllerState,
         );
 
-        this.currentRenderedFrame = this.p5.createImage(256, 240);
-        this.nextRenderedFrame = this.p5.createImage(256, 240);
+        this.frameBufferImage = this.p5.createImage(256, 240);
 
         this.nes.onPausedListeners.push(() => {
             this.updateDebug();
@@ -220,8 +188,6 @@ export class NesVibes {
     private instructionResultToLogMessage(instructionResult: InstructionResult): string {
         let instructionTargetAddress = '';
 
-        //CFEA  A1 80     LDA ($80,X) @ 83 = 0303 = 5C    A:5B X:03 Y:69 P:25 SP:FB PPU: 22,217 CYC:2573
-
         if (instructionResult.target_address != undefined) {
             if (instructionResult.instructionMetadata?.mode == AddressingMode.IndirectX || instructionResult.instructionMetadata?.mode == AddressingMode.IndirectY) {
                 instructionTargetAddress += '($' + numberToHex(instructionResult.indirectOffsetBase!) + ',';
@@ -274,14 +240,24 @@ export class NesVibes {
     async setup(rom: string) {
         await this.loadROMFromURL(rom);
         this.nes.onReset();
-
-        this.updatePatternTables();
+        await this.nes.initialize();
 
         this.lastFrameTime = performance.now();
+
+        this.frameBufferImage.loadPixels();
+        for (let i = 0; i < this.frameBufferImage.pixels.length; i++) {
+            if (i % 4 == 3)
+                this.frameBufferImage.pixels[i] = 255;
+        }
+        this.frameBufferImage.updatePixels();
+
 
         this.p5.draw = () => {
             this.p5.background(0);
             this.p5.scale(this.scale).noSmooth();
+
+            //this.frameBufferImage.loadPixels();
+            this.nes.outputBuffer = this.frameBufferImage.pixels;
 
             while (!this.nes.frameReady && !this.nes.isPaused()) {
                 try {
@@ -292,7 +268,8 @@ export class NesVibes {
                 }
             }
 
-            this.p5.image(this.currentRenderedFrame, 0, 0);
+            this.frameBufferImage.updatePixels();
+            this.p5.image(this.frameBufferImage, 0, 0);
 
             // Calculate running average FPS
             const currentTime = performance.now();

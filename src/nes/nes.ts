@@ -7,7 +7,6 @@ import { APU } from "./apu";
 import { CartridgeLoader } from "./cartridge_loader";
 
 export class Nes {
-
     private cpu: Cpu2A03;
     private cartridge: Cartridge | undefined;
     private ram: RAM;
@@ -16,7 +15,6 @@ export class Nes {
     private cartridgeLoader: CartridgeLoader;
     private logger: (message: string) => void;
     private instructionLogger: (instruction: InstructionResult) => void;
-    private onRenderedPixel: (x: number, y: number, finalColor: number[]) => void;
     getControllerState: (controllerNumber: number) => number;
     latchControllerStates: () => void;
 
@@ -24,6 +22,7 @@ export class Nes {
     public onPausedListeners: (() => void)[] = [];
     public breakOnRti: boolean = false;
     public frameReady: boolean = false;
+    public outputBuffer: number[] = [];
 
     // This is a hack to allow the CPU to read the value of the accumulator via the bus
     public CPU_BUSADDRESS_REGISTER_A: number = 0xFFFFFF + 1;
@@ -33,13 +32,11 @@ export class Nes {
 
     constructor(logger: (message: string) => void,
         instructionLogger: (instruction: InstructionResult) => void,
-        onRenderedPixel: (current_dot: number, current_scanline: number, finalColor: number[]) => void,
         latchControllerStates: () => void,
         getControllerState: (controllerNumber: number) => number,
     ) {
         this.logger = logger;
         this.instructionLogger = instructionLogger;
-        this.onRenderedPixel = onRenderedPixel;
         this.getControllerState = getControllerState;
         this.latchControllerStates = latchControllerStates;
         this.cpu = new Cpu2A03(this);
@@ -48,6 +45,10 @@ export class Nes {
         this.ppu = new PPU(this);
         this.apu = new APU(this);
         this.cartridgeLoader = new CartridgeLoader(this);
+    }
+
+    async initialize() {
+        await this.apu.initialize();
     }
 
     public isPaused(): boolean {
@@ -242,8 +243,7 @@ export class Nes {
         }
     }
 
-
-    setRenderedPixel(x: number, y: number, finalColor: number[]) {
-        this.onRenderedPixel(x, y, finalColor);
+    onFrameReady() {
+        this.frameReady = true;
     }
 }

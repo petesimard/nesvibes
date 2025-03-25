@@ -83,6 +83,7 @@ export class PPU implements BusDevice {
     internal_oam_M: number = -1;
     internal_secondaryOAM_sprite0: number = -1;
     internal_latched_secondaryOAM_sprite0: number = -1;
+    pixelNumber: number = 0;
 
     constructor(nes: Nes) {
         this.nes = nes;
@@ -400,7 +401,8 @@ export class PPU implements BusDevice {
                 this.current_scanline = 0;
                 this.current_dot = 0;
                 this.frame_counter++;
-                this.nes.frameReady = true;
+                this.pixelNumber = 0;
+                this.nes.onFrameReady();
             }
         }
 
@@ -619,7 +621,14 @@ export class PPU implements BusDevice {
 
         const finalColor = this.bitsToColor(palette);
 
-        this.nes.setRenderedPixel(this.current_dot - 1, this.current_scanline, finalColor);
+
+
+        const index = (this.pixelNumber) * 4
+        this.nes.outputBuffer[index] = finalColor[0];
+        this.nes.outputBuffer[index + 1] = finalColor[1];
+        this.nes.outputBuffer[index + 2] = finalColor[2];
+
+        this.pixelNumber++;
     }
 
     private doSprite0Check(selectedSprite: number, sprite_patternBits: number, tile_patternBits: number): boolean {
