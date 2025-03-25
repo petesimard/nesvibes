@@ -42,6 +42,7 @@ const resetButton = document.getElementById('reset') as HTMLButtonElement;
 const stepButton = document.getElementById('step') as HTMLButtonElement;
 const paletteView = document.getElementById('palette-view');
 const paletteCells: HTMLDivElement[] = [];
+const ctx3 = nameTable0.getContext('2d');
 
 // Create 32 8x8 divs for palette view
 if (paletteView) {
@@ -72,9 +73,15 @@ export class NesVibes {
     private currentRenderedFrame: p5.Image;
     private nextRenderedFrame: p5.Image;
 
+    private lastFpsUpdate: number = 0;
+    private cachedFps: number = 0;
+    private fpsAccumulator: number = 0;
+    private frameCount: number = 0;
+
     controller1State: number = 0;
     controller1LatchedState: number = 0;
     controllerReadIndex: number = 0;
+    lastFrameTime: number = 0;
 
     constructor(scale: number = 1) {
         this.scale = scale;
@@ -84,6 +91,7 @@ export class NesVibes {
                 const canvas = document.getElementById('canvas')!;
                 p5.createCanvas(256 * scale, 240 * scale).parent(canvas);
                 p5.background(0);
+                p5.frameRate(60);
             };
         };
 
@@ -205,6 +213,8 @@ export class NesVibes {
         this.updateLogWindow();
         this.updatePatternTables();
         this.updatePaletteView();
+
+        ctx3!.putImageData(this.nes.getPpu().getNameTableImage(0), 0, 0);
     }
 
     private instructionResultToLogMessage(instructionResult: InstructionResult): string {
@@ -267,19 +277,13 @@ export class NesVibes {
 
         this.updatePatternTables();
 
-        const ctx3 = nameTable0.getContext('2d');
+        this.lastFrameTime = performance.now();
 
         this.p5.draw = () => {
             this.p5.background(0);
             this.p5.scale(this.scale).noSmooth();
 
-            this.p5.fill(255, 0, 0);
-            this.p5.image(this.currentRenderedFrame, 0, 0);
-
-
-            ctx3!.putImageData(this.nes.getPpu().getNameTableImage(0), 0, 0);
-
-            for (let i = 0; i < 100000; i++) {
+            while (!this.nes.frameReady && !this.nes.isPaused()) {
                 try {
                     this.nes.clock();
                 } catch (error) {
@@ -287,6 +291,31 @@ export class NesVibes {
                     throw error;
                 }
             }
+
+            this.p5.image(this.currentRenderedFrame, 0, 0);
+
+            // Calculate running average FPS
+            const currentTime = performance.now();
+            const currentFps = this.p5.frameRate();
+            this.fpsAccumulator += currentFps;
+            this.frameCount++;
+
+            if (currentTime - this.lastFpsUpdate > 500) {
+                this.cachedFps = Math.round(this.fpsAccumulator / this.frameCount);
+                this.lastFpsUpdate = currentTime;
+                this.fpsAccumulator = 0;
+                this.frameCount = 0;
+            }
+
+            // Draw FPS counter in top right
+            this.p5.fill(255);
+            this.p5.noStroke();
+            this.p5.textAlign(this.p5.RIGHT, this.p5.TOP);
+            this.p5.textSize(5);
+            this.p5.text(`FPS: ${this.cachedFps}`, (this.p5.width / this.scale) - 2, 2);
+
+            this.nes.frameReady = false;
+            this.lastFrameTime = currentTime;
         }
     }
 

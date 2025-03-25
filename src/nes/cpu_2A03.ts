@@ -132,7 +132,7 @@ export class Cpu2A03 {
         if (result.done) {
             this.instruction = undefined;
 
-            this.nes.logInstruction(this.instructionResult);
+            //this.nes.logInstruction(this.instructionResult);
 
             if (DEBUG_BREAKPOINT_CYCLE != undefined && this.instructionResult.cycles >= DEBUG_BREAKPOINT_CYCLE) {
                 throw new Error("Breakpoint reached");
@@ -184,6 +184,7 @@ export class Cpu2A03 {
 
 
     private logInstruction(instructionOpCode: number) {
+        return;
 
         const instructionData = instructionMap[instructionOpCode];
         if (!instructionData) {
@@ -226,7 +227,6 @@ export class Cpu2A03 {
 
     * ExecuteNMI(): Instruction {
         const currentPC = this.register_PC;
-        this.nes.log(`NMI Start: Saved PC: ${numberToHex(currentPC)}`);
 
         yield;
         yield;
@@ -240,8 +240,6 @@ export class Cpu2A03 {
         this.toggleFlag(this.FLAG_INTERRUPT, true);
         yield;
         yield;
-
-        this.nes.log(`NMI End: New PC: ${numberToHex(this.register_PC)}`);
     }
 
     // BRK - Break

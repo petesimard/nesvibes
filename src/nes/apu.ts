@@ -1,4 +1,5 @@
 import { BusDevice } from "../emulator/busdevice_interface";
+import { numberToHex } from "../emulator/utils";
 import { Nes } from "./nes";
 
 export class APU implements BusDevice {
@@ -21,6 +22,7 @@ export class APU implements BusDevice {
     }
 
     write(address: number, value: number): void {
+        //console.log(`APU write ${numberToHex(address)} = ${numberToHex(value)}`);
 
     }
 }

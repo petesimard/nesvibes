@@ -23,6 +23,7 @@ export class Nes {
     public cycles: number = 0;
     public onPausedListeners: (() => void)[] = [];
     public breakOnRti: boolean = false;
+    public frameReady: boolean = false;
 
     // This is a hack to allow the CPU to read the value of the accumulator via the bus
     public CPU_BUSADDRESS_REGISTER_A: number = 0xFFFFFF + 1;
@@ -98,6 +99,7 @@ export class Nes {
         this.ppu.onReset();
         this.apu.onReset();
         this.cycles = 0;
+        this.frameReady = false;
     }
 
     clock(step: boolean = false) {

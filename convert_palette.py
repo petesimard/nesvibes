@@ -16,7 +16,7 @@ def parse_rgb_line(line):
 def convert_palette_to_ts():
     palette_data = []
     
-    with open('paletts/2C02G_wiki.pal', 'rb') as f:
+    with open('palettes/Nintendulator.pal', 'rb') as f:
         # Read the entire file as bytes
         data = f.read()
         
@@ -28,7 +28,7 @@ def convert_palette_to_ts():
             palette_data.append([r, g, b])
 
     # Generate TypeScript output
-    ts_output = "// Auto-generated from 2C02G_wiki.pal\n\n"
+    ts_output = "// Auto-generated\n\n"
     ts_output += "export const NES_PALETTE = [\n"
     
     for rgb in palette_data:
@@ -37,7 +37,7 @@ def convert_palette_to_ts():
     ts_output += "] as const;\n"
     
     # Write the TypeScript file
-    with open('src/nes/palette.ts', 'w') as f:
+    with open('src/nes/palettes/palette.ts', 'w') as f:
         f.write(ts_output)
     
     print("Palette converted to TypeScript successfully.")

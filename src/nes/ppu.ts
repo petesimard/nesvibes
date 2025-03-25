@@ -113,11 +113,12 @@ export class PPU implements BusDevice {
         else if (address >= 0x2000 && address < 0x3F00) {
             return this.vram[address - 0x2000];
         }
-        else if (address >= 0x3F00 && address <= 0x3F1F) {
-            return this.palette[address - 0x3F00];
-        }
-        else if (address >= 0x3F20 && address <= 0x3FFF) {
-            return this.palette[(address - 0x3F20) % 0x20];
+        else if (address >= 0x3F00 && address <= 0x3FFF) {
+            if (address % 4 == 0 && (address & 0x10) != 0) {
+                address &= ~0x10;
+            }
+
+            return this.palette[(address - 0x3F00) % 0x20];
         }
         else {
             throw new Error("PPU read_internal: Invalid address " + numberToHex(address));
@@ -136,11 +137,12 @@ export class PPU implements BusDevice {
         else if (address >= 0x2000 && address < 0x3F00) {
             this.vram[address - 0x2000] = value;
         }
-        else if (address >= 0x3F00 && address <= 0x3F1F) {
-            this.palette[address - 0x3F00] = value;
-        }
-        else if (address >= 0x3F20 && address <= 0x3FFF) {
-            this.palette[(address - 0x3F20) % 0x20] = value;
+        else if (address >= 0x3F00 && address <= 0x3FFF) {
+            if (address % 4 == 0 && (address & 0x10) != 0) {
+                address &= ~0x10;
+            }
+
+            this.palette[(address - 0x3F00) % 0x20] = value;
         }
         else {
             throw new Error("PPU write_internal: Invalid address " + numberToHex(address));
@@ -398,6 +400,7 @@ export class PPU implements BusDevice {
                 this.current_scanline = 0;
                 this.current_dot = 0;
                 this.frame_counter++;
+                this.nes.frameReady = true;
             }
         }
 
@@ -556,12 +559,7 @@ export class PPU implements BusDevice {
                     continue;
                 }
 
-                const didSprite0Hit = this.doSprite0Check(i, sprite_patternBits, tile_patternBits);
-
-                if (didSprite0Hit) {
-                    console.log(`Sprite zero hit ${i} ${this.current_dot} ${this.current_scanline} internal_latched_secondaryOAM_sprite0 ${this.internal_latched_secondaryOAM_sprite0}`);
-                }
-
+                this.doSprite0Check(i, sprite_patternBits, tile_patternBits);
                 selectedSprite = i;
                 break;
             }
@@ -571,7 +569,7 @@ export class PPU implements BusDevice {
         let isSpriteVisible = false;
 
         if (selectedSprite != -1) {
-            isSpriteVisible = tile_patternBits != 0;
+            isSpriteVisible = tile_patternBits == 0;
 
             if (!isSpriteVisible) {
                 // Both visible
@@ -582,11 +580,11 @@ export class PPU implements BusDevice {
             }
         }
 
+        let isTransparent = false;
 
         if (this.current_dot <= 8 && (this.register_PPUMASK & this.flags_PPUMASK_SHOW_BACKGROUND_IN_LEFT_8) == 0) {
             tile_patternBits = 0;
         }
-
 
         if (isSpriteVisible && (this.register_PPUMASK & this.flags_PPUMASK_ENABLE_SPRITES) != 0) {
             // Draw sprite            
@@ -595,10 +593,14 @@ export class PPU implements BusDevice {
             if ((this.register_PPUMASK & this.flags_PPUMASK_SHOW_SPRITES_IN_LEFT_8) == 0 && this.current_dot < 9)
                 paletteIndex = 0;
 
+            isTransparent = sprite_patternBits == 0;
+
         }
         else {
             // Draw background
             paletteIndex = tile_patternBits | (attributeBits << 2);
+
+            isTransparent = tile_patternBits == 0;
 
             if ((this.register_PPUMASK & this.flags_PPUMASK_ENABLE_BACKGROUND) == 0) {
                 paletteIndex = 0;
@@ -608,16 +610,19 @@ export class PPU implements BusDevice {
                 paletteIndex = 0;
         }
 
+        if (isTransparent) {
+            paletteIndex = 0;
+        }
+
         const paletteAddress = 0x3F00 | paletteIndex;
         const palette = this.read_internal(paletteAddress);
 
         const finalColor = this.bitsToColor(palette);
+
         this.nes.setRenderedPixel(this.current_dot - 1, this.current_scanline, finalColor);
     }
 
-    td = 0;
     private doSprite0Check(selectedSprite: number, sprite_patternBits: number, tile_patternBits: number): boolean {
-
         if (this.internal_latched_secondaryOAM_sprite0 != -1 && selectedSprite == this.internal_latched_secondaryOAM_sprite0 &&
             (this.register_PPUMASK & this.flags_PPUMASK_ENABLE_BACKGROUND) != 0 &&
             (this.register_PPUMASK & this.flags_PPUMASK_ENABLE_SPRITES) != 0 &&
@@ -628,8 +633,6 @@ export class PPU implements BusDevice {
         ) {
             // Sprite zero hit
             this.register_PPUSTATUS |= this.flags_PPUSTATUS_SPRITE_ZERO_HIT;
-            console.log('Sprite zero hit');
-            this.td++;
             return true;
         }
         return false;
@@ -788,6 +791,9 @@ export class PPU implements BusDevice {
         else if (this.current_dot >= 65 && this.current_dot <= 256) {
             // Sprite evaluation
 
+            const is8x16 = (this.register_PPUCTRL & this.flags_PPUCTRL_SPRITE_SIZE) != 0;
+            const yOffset = is8x16 ? 15 : 7;
+
             if (this.current_dot % 2 == 0) {
                 // Write on even dots
                 if (this.internal_oam_N < 64) {
@@ -798,7 +804,7 @@ export class PPU implements BusDevice {
                         let secondaryOamIndex = -1;
 
                         for (let m1 = 0; m1 < 8; m1++) {
-                            if (this.secondaryOAM[(m1 * 4) + 1] == 0xFF) {
+                            if (this.secondaryOAM[(m1 * 4)] == 0xFF) {
                                 // Open slot
                                 secondaryOamIndex = m1;
                                 break;
@@ -808,11 +814,11 @@ export class PPU implements BusDevice {
 
                         if (secondaryOamIndex != -1) {
                             // Slot open
-                            this.secondaryOAM[secondaryOamIndex * 4] = this.OAM[this.internal_oam_N * 4];
-                            const isSpriteInRange = this.current_scanline >= spriteY && this.current_scanline <= spriteY + 7;
+                            const isSpriteInRange = this.current_scanline >= spriteY && this.current_scanline <= spriteY + yOffset;
 
                             if (isSpriteInRange) {
                                 // In range
+                                this.secondaryOAM[secondaryOamIndex * 4] = this.OAM[this.internal_oam_N * 4];
                                 this.secondaryOAM[(secondaryOamIndex * 4) + 1] = this.OAM[(this.internal_oam_N * 4) + 1];
                                 this.secondaryOAM[(secondaryOamIndex * 4) + 2] = this.OAM[(this.internal_oam_N * 4) + 2];
                                 this.secondaryOAM[(secondaryOamIndex * 4) + 3] = this.OAM[(this.internal_oam_N * 4) + 3];
@@ -832,7 +838,7 @@ export class PPU implements BusDevice {
                     else {
                         // No open slot
                         const spriteY = this.OAM[(this.internal_oam_N) * 4 + this.internal_oam_M];
-                        const isSpriteInRange = spriteY >= this.current_scanline && spriteY <= this.current_scanline + 7;
+                        const isSpriteInRange = spriteY >= this.current_scanline && spriteY <= this.current_scanline + yOffset;
 
                         if (isSpriteInRange) {
                             // Overflow
@@ -868,26 +874,40 @@ export class PPU implements BusDevice {
             const attribute = this.secondaryOAM[spriteNumber * 4 + 2];
             const x = this.secondaryOAM[spriteNumber * 4 + 3];
 
-            if (tile == 0xFF) {
+            if (y == 0xFF) {
                 this.sprites_xPos[spriteNumber] = -1;
                 return;
             }
 
+            let fineY = this.current_scanline - y;
+            let bottomSprite = false;
+
+            if (fineY > 7) {
+                fineY -= 8;
+                bottomSprite = true;
+            }
+
+
             this.sprites_xPos[spriteNumber] = x;
             this.sprites_tiles_attributes[spriteNumber] = attribute;
 
+            const is8x16 = (this.register_PPUCTRL & this.flags_PPUCTRL_SPRITE_SIZE) != 0;
+
             let patternTableNumber = 0;
-            if ((this.register_PPUCTRL & this.flags_PPUCTRL_SPRITE_SIZE) != 0) {
+            if (is8x16) {
                 // 8x16 sprites
                 patternTableNumber = tile & 0x01;
                 tile = tile >> 1;
+
+                if (bottomSprite) {
+                    tile += 1;
+                }
             }
             else {
                 patternTableNumber = (this.register_PPUCTRL & this.flags_PPUCTRL_SPRITE_PATTERN_TABLE_ADDRESS) != 0 ? 1 : 0;
             }
 
             const patternPatternTableAddress = patternTableNumber == 0 ? this.address_PATTERNTABLE_0 : this.address_PATTERNTABLE_1;
-            let fineY = this.current_scanline - y;
 
             if ((attribute & 0x80) != 0) {
                 fineY = 7 - fineY;
