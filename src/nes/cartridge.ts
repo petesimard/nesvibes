@@ -26,14 +26,48 @@ export abstract class Cartridge implements BusDevice {
 
         const chrEnd = prgEnd + chrRomBytesLength;
         this.characterRom = rom.slice(prgEnd, chrEnd);
+
+        this.initialize();
     }
 
     abstract ppu_read(address: number): number;
     abstract ppu_write(address: number, value: number): void;
     abstract read(address: number): number;
     abstract write(address: number, value: number): void;
+    abstract initialize(): void;
 
     public isHorizontalMirroring(): boolean {
         return this.header.isHorizontalMirroring;
     }
+
+    mapNametableAddress(address: number): number {
+        if (this.isHorizontalMirroring()) {
+            // Horizontal mirroring
+            if (address < 0x2400) {
+                // Left nametable
+                address = address;
+            }
+            else if (address >= 0x2400 && address < 0x2C00) {
+                address = address - 0x0400;
+            }
+            else {
+                // Right nametable
+                address = address - 0x0800;
+            }
+        }
+        else {
+            // Vertical mirroring
+            if (address < 0x2800) {
+                // Top nametable
+                address = address;
+            }
+            else {
+                // Bottom nametable
+                address = address - 0x0800;
+            }
+        }
+
+        return address;
+    }
 }
+

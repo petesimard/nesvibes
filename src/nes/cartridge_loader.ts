@@ -1,8 +1,10 @@
 import JSZip from "jszip";
 import { Nes } from "./nes";
 import { bytesToHex } from "../emulator/utils";
-import { Mapper01 } from "../mappers/mapper_01";
 import { Cartridge } from "./cartridge";
+
+import { Mapper00 } from "../mappers/mapper_00";
+import { Mapper01 } from "../mappers/mapper_01";
 
 export class CartridgeLoader {
     constructor(private nes: Nes) {
@@ -20,6 +22,9 @@ export class CartridgeLoader {
 
         switch (header.mapperNumber) {
             case 0:
+                MapperClass = Mapper00;
+                break;
+            case 1:
                 MapperClass = Mapper01;
                 break;
             default:

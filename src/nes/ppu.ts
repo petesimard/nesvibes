@@ -4,6 +4,7 @@ import { Nes } from "./nes";
 import { NES_PALETTE } from "./palettes/palette";
 
 export class PPU implements BusDevice {
+
     private nes: Nes;
 
     private vram: Uint8Array = new Uint8Array(2048); // 2KB for nametables
@@ -134,6 +135,10 @@ export class PPU implements BusDevice {
 
         if (address < 0x2000) {
             this.nes.getCartridge().ppu_write(address, value);
+        }
+        else if (address >= 0x2000 && address <= 0x2FFF) {
+            address = this.nametableAddressToVRAM(address);
+            this.vram[address] = value;
         }
         else if (address >= 0x2000 && address < 0x3F00) {
             this.vram[address - 0x2000] = value;
@@ -286,33 +291,7 @@ export class PPU implements BusDevice {
     }
 
     private nametableAddressToVRAM(address: number) {
-        const isHorizontalMirroring = this.nes.getCartridge().isHorizontalMirroring();
-
-        if (isHorizontalMirroring) {
-            // Horizontal mirroring
-            if (address < 0x2400) {
-                // Left nametable
-                address = address;
-            }
-            else if (address >= 0x2400 && address < 0x2C00) {
-                address = address - 0x0400;
-            }
-            else {
-                // Right nametable
-                address = address - 0x0800;
-            }
-        }
-        else {
-            // Vertical mirroring
-            if (address < 0x2800) {
-                // Top nametable
-                address = address;
-            }
-            else {
-                // Bottom nametable
-                address = address - 0x0800;
-            }
-        }
+        address = this.nes.getCartridge().mapNametableAddress(address);
 
         // Fetch from VRAM
         address -= 0x2000;
@@ -720,6 +699,75 @@ export class PPU implements BusDevice {
         return image;
     }
 
+    getSprite(i: number): [ImageData, string] {
+
+        const is8x16 = (this.register_PPUCTRL & this.flags_PPUCTRL_SPRITE_SIZE) != 0;
+        const image = new ImageData(8, is8x16 ? 16 : 8);
+        const attribute = this.OAM[i * 4 + 2];
+
+        for (let pixelY = 0; pixelY < (is8x16 ? 16 : 8); pixelY++) {
+
+            for (let pixelX = 0; pixelX < 8; pixelX++) {
+
+                let fineY = pixelY;
+                if ((attribute & 0x80) != 0) {
+                    fineY = 15 - fineY;
+                }
+
+
+                const spriteY = this.OAM[i * 4];
+                let tile = this.OAM[i * 4 + 1];
+                const spriteX = this.OAM[i * 4 + 3];
+
+
+                let patternTableNumber = 0;
+                if (is8x16) {
+                    // 8x16 sprites
+                    patternTableNumber = tile & 0x01;
+                    tile &= ~(1);
+
+                    if (fineY > 7) {
+                        tile += 1;
+                        fineY = fineY - 8;
+                    }
+                }
+                else {
+                    patternTableNumber = (this.register_PPUCTRL & this.flags_PPUCTRL_SPRITE_PATTERN_TABLE_ADDRESS) != 0 ? 1 : 0;
+                }
+
+                let spriteFineX = pixelX;
+
+                if ((attribute & 0x40) != 0) {
+                    spriteFineX = 7 - spriteFineX;
+                }
+
+                const patternPatternTableAddress = patternTableNumber == 0 ? this.address_PATTERNTABLE_0 : this.address_PATTERNTABLE_1;
+
+                const patternTableLowAddress = patternPatternTableAddress + (tile * 16) + fineY;
+                const lowBits = this.nes.getCartridge().ppu_read(patternTableLowAddress);
+                const lowBit = (lowBits & (1 << (spriteFineX))) != 0 ? 1 : 0;
+
+                const patternTableHighAddress = patternPatternTableAddress + (tile * 16) + fineY + 8;
+                const highBits = this.nes.getCartridge().ppu_read(patternTableHighAddress);
+                const highBit = (highBits & (1 << (spriteFineX))) != 0 ? 1 : 0;
+                const sprite_patternBits = lowBit | (highBit << 1);
+                const paletteIndex = sprite_patternBits | ((attribute & 0x3) << 2) | 0x10;
+
+                const paletteAddress = 0x3F00 | paletteIndex;
+                const palette = this.read_internal(paletteAddress);
+                const finalColor = this.bitsToColor(palette);
+
+                const index = (pixelX + pixelY * 8) * 4;
+                image.data[index] = finalColor[0];
+                image.data[index + 1] = finalColor[1];
+                image.data[index + 2] = finalColor[2];
+                image.data[index + 3] = 255;
+            }
+        }
+
+        return [image, numberToHex(this.OAM[i * 4 + 1])];
+    }
+
     getNameTableImage(table: number): ImageData {
         const baseNameTableAddress = 0x2000 | (table * 0x400);
 
@@ -906,7 +954,7 @@ export class PPU implements BusDevice {
             if (is8x16) {
                 // 8x16 sprites
                 patternTableNumber = tile & 0x01;
-                tile = tile >> 1;
+                tile &= ~(1);
 
                 if (bottomSprite) {
                     tile += 1;

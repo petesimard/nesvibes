@@ -2,13 +2,15 @@ export class AudioManager {
     private audioContext: AudioContext | null = null;
     private audioWorklet: AudioWorkletNode | null = null;
     private isInitialized = false;
+    private sampleBuffer: number[] = [];
+    private readonly BUFFER_SIZE = 16;
 
     async initialize() {
         if (this.isInitialized) return;
 
         try {
             this.audioContext = new AudioContext({
-                sampleRate: 44100,
+                sampleRate: 32100,
                 latencyHint: 'interactive'
             });
 
@@ -22,6 +24,7 @@ export class AudioManager {
 
             this.audioWorklet.connect(this.audioContext.destination);
             this.isInitialized = true;
+            console.log("AudioManager initialized");
         } catch (error) {
             console.error('Failed to initialize audio:', error);
             throw error;
@@ -31,10 +34,26 @@ export class AudioManager {
     pushSample(sample: number) {
         if (!this.isInitialized || !this.audioWorklet) return;
 
-        this.audioWorklet.port.postMessage({
-            type: 'sample',
-            value: sample
-        });
+        this.sampleBuffer.push(sample);
+
+        // Send samples in batches
+        if (this.sampleBuffer.length >= this.BUFFER_SIZE) {
+            this.audioWorklet.port.postMessage({
+                type: 'samples',
+                value: this.sampleBuffer
+            });
+            this.sampleBuffer = [];
+        }
+    }
+
+    flushSamples() {
+        if (this.sampleBuffer.length > 0 && this.audioWorklet) {
+            this.audioWorklet.port.postMessage({
+                type: 'samples',
+                value: this.sampleBuffer
+            });
+            this.sampleBuffer = [];
+        }
     }
 
     suspend() {
@@ -46,6 +65,7 @@ export class AudioManager {
     }
 
     dispose() {
+        this.flushSamples();
         if (this.audioWorklet) {
             this.audioWorklet.disconnect();
             this.audioWorklet = null;

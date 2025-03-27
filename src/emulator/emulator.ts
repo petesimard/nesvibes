@@ -6,6 +6,29 @@ import { InstructionResult } from "../nes/cpu_2A03";
 import { AddressingMode } from "../nes/2A03_instruction_map";
 
 
+class RingBuffer<T> {
+    private buffer: Array<T | null>;
+    private index = 0;
+    private full = false;
+
+    constructor(private size: number) {
+        this.buffer = new Array<T | null>(size).fill(null);
+    }
+
+    add(item: T) {
+        this.buffer[this.index] = item;
+        this.index = (this.index + 1) % this.size;
+        if (this.index === 0) this.full = true;
+    }
+
+    getAll(): T[] {
+        if (!this.full) return this.buffer.slice(0, this.index) as T[];
+        return [
+            ...this.buffer.slice(this.index),
+            ...this.buffer.slice(0, this.index),
+        ] as T[];
+    }
+}
 
 
 
@@ -15,6 +38,9 @@ const stackContainer = document.getElementById('stack-container');
 const patternTable0 = document.getElementById('pattern-table-0') as HTMLCanvasElement;
 const patternTable1 = document.getElementById('pattern-table-1') as HTMLCanvasElement;
 const nameTable0 = document.getElementById('name-table-0') as HTMLCanvasElement;
+const nameTable1 = document.getElementById('name-table-1') as HTMLCanvasElement;
+const nameTable2 = document.getElementById('name-table-2') as HTMLCanvasElement;
+const nameTable3 = document.getElementById('name-table-3') as HTMLCanvasElement;
 const breakNmi = document.getElementById('break-nmi') as HTMLInputElement;
 const breakRti = document.getElementById('break-sti') as HTMLInputElement;
 const breakInstruction = document.getElementById('break-instruction') as HTMLInputElement;
@@ -23,9 +49,16 @@ const pauseResumeButton = document.getElementById('pause-resume');
 const resetButton = document.getElementById('reset') as HTMLButtonElement;
 const stepButton = document.getElementById('step') as HTMLButtonElement;
 const paletteView = document.getElementById('palette-view');
-const paletteCells: HTMLDivElement[] = [];
-const ctx3 = nameTable0.getContext('2d');
+const spriteView = document.getElementById('sprite-view');
+const patternTable0Context = patternTable0.getContext('2d');
+const patternTable1Context = patternTable1.getContext('2d');
+const nameTable0Context = nameTable0.getContext('2d');
+const nameTable1Context = nameTable1.getContext('2d');
+const nameTable2Context = nameTable2.getContext('2d');
+const nameTable3Context = nameTable3.getContext('2d');
 
+const paletteCells: HTMLDivElement[] = [];
+const spriteCells: HTMLDivElement[] = [];
 // Create 32 8x8 divs for palette view
 if (paletteView) {
     paletteView.style.display = 'grid';
@@ -43,9 +76,24 @@ if (paletteView) {
     }
 }
 
+if (spriteView) {
+    spriteView.style.display = 'grid';
+    spriteView.style.gridTemplateColumns = 'repeat(8, 33px)';
+    spriteView.style.gap = '1px';
+
+    for (let i = 0; i < 64; i++) {
+        const spriteCell = document.createElement('div');
+        spriteCell.style.width = '26px';
+        spriteCell.style.height = '26px';
+        spriteCell.style.backgroundColor = '#000000';
+        spriteView.appendChild(spriteCell);
+        spriteCells.push(spriteCell);
+    }
+}
+
 
 const logMessages: string[] = [];
-const instructionLogMessages: InstructionResult[] = [];
+const instructionLogMessages: RingBuffer<InstructionResult> = new RingBuffer<InstructionResult>(100000);
 
 export class NesVibes {
     private p5: P5;
@@ -97,7 +145,7 @@ export class NesVibes {
                 return;
 
             logMessages.push(message);
-            if (logMessages.length > 100000) {
+            if (logMessages.length > 50000) {
                 logMessages.shift();
             }
 
@@ -107,11 +155,7 @@ export class NesVibes {
             this.updateLogWindow();
         },
             (instruction: InstructionResult) => {
-                instructionLogMessages.push(instruction);
-
-                if (instructionLogMessages.length > 20000) {
-                    instructionLogMessages.shift();
-                }
+                instructionLogMessages.add(instruction);
             },
 
             latchControllerStates,
@@ -181,8 +225,7 @@ export class NesVibes {
         this.updateLogWindow();
         this.updatePatternTables();
         this.updatePaletteView();
-
-        ctx3!.putImageData(this.nes.getPpu().getNameTableImage(0), 0, 0);
+        this.updateSpriteView();
     }
 
     private instructionResultToLogMessage(instructionResult: InstructionResult): string {
@@ -229,7 +272,9 @@ export class NesVibes {
 
         logMessages.length = 0;
 
-        instructionLogMessages.forEach(instruction => {
+        const instructions = instructionLogMessages.getAll();
+
+        instructions.forEach(instruction => {
             logMessages.push(this.instructionResultToLogMessage(instruction));
         });
 
@@ -301,16 +346,15 @@ export class NesVibes {
             return;
 
 
-        const ctx0 = patternTable0.getContext('2d');
-        const ctx1 = patternTable1.getContext('2d');
-        const ctx3 = nameTable0.getContext('2d');
-
-        if (!ctx0 || !ctx1 || !ctx3)
+        if (!patternTable0Context || !patternTable1Context || !nameTable0Context || !nameTable1Context || !nameTable2Context || !nameTable3Context)
             return;
 
-        ctx0.putImageData(this.nes.getPpu().getPatternTableImage(0), 0, 0);
-        ctx1.putImageData(this.nes.getPpu().getPatternTableImage(1), 0, 0);
-        ctx3.putImageData(this.nes.getPpu().getNameTableImage(0), 0, 0);
+        patternTable0Context.putImageData(this.nes.getPpu().getPatternTableImage(0), 0, 0);
+        patternTable1Context.putImageData(this.nes.getPpu().getPatternTableImage(1), 0, 0);
+        nameTable0Context.putImageData(this.nes.getPpu().getNameTableImage(0), 0, 0);
+        nameTable1Context.putImageData(this.nes.getPpu().getNameTableImage(1), 0, 0);
+        nameTable2Context.putImageData(this.nes.getPpu().getNameTableImage(2), 0, 0);
+        nameTable3Context.putImageData(this.nes.getPpu().getNameTableImage(3), 0, 0);
     }
 
     updatePaletteView() {
@@ -323,6 +367,42 @@ export class NesVibes {
             paletteCells[i].style.backgroundColor = bgColor;
         }
 
+    }
+
+    updateSpriteView() {
+        if (!spriteView)
+            return;
+
+        for (let i = 0; i < 64; i++) {
+            const [sprite, tileNumber] = this.nes.getPpu().getSprite(i);
+            // Clear existing content
+            spriteCells[i].innerHTML = '';
+
+            // Create canvas element
+            const canvas = document.createElement('canvas');
+            canvas.width = sprite.width;
+            canvas.height = sprite.height;
+            canvas.style.width = '32px';
+            canvas.style.height = '48px';
+            canvas.style.imageRendering = 'pixelated';
+
+
+            // Get context and draw sprite image data
+            const ctx = canvas.getContext('2d');
+            if (ctx) {
+                ctx.putImageData(sprite, 0, 0);
+            }
+
+            spriteCells[i].appendChild(canvas);
+
+            // Add tile number text below sprite
+            const tileText = document.createElement('div');
+            tileText.textContent = `${tileNumber}`;
+            tileText.style.fontSize = '10px';
+            tileText.style.textAlign = 'center';
+            tileText.style.color = '#888';
+            spriteCells[i].appendChild(tileText);
+        }
     }
 
     private updateDebugDisplay() {
@@ -447,3 +527,4 @@ export class NesVibes {
     }
 
 }
+

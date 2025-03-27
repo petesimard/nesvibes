@@ -37,6 +37,13 @@ class NESAudioProcessor extends AudioWorkletProcessor {
             if (event.data.type === 'sample') {
                 this.pushSample(event.data.value);
             }
+
+            if (event.data.type === 'samples') {
+                // Process array of samples
+                event.data.value.forEach((sample: number) => {
+                    this.pushSample(sample);
+                });
+            }
         };
     }
 

@@ -8,6 +8,8 @@ export type InstructionFunc = (mode: AddressingMode) => Instruction;
 const DEBUG_BREAKPOINT_CYCLE: number | undefined = undefined;
 //const DEBUG_BREAKPOINT_CYCLE: number | undefined = 2560;
 
+const LOG_INSTRUCTIONS: boolean = true;
+
 export class InstructionResult {
     cycles: number = 0;
     instructionMetadata: InstructionMetadata | undefined = undefined;
@@ -27,7 +29,6 @@ export class InstructionResult {
 }
 
 export class Cpu2A03 {
-
     nes: Nes;
 
     cpuCycles: number = 0;
@@ -50,6 +51,7 @@ export class Cpu2A03 {
     FLAG_NEGATIVE: number = 1 << 7;
 
     pendingNonMaskableInterruptFlag: boolean = false;
+    pendingIRQFlag: boolean = false;
 
     STACK_START: number = 0x0100;
 
@@ -100,11 +102,17 @@ export class Cpu2A03 {
 
         if (this.pendingNonMaskableInterruptFlag) {
             this.pendingNonMaskableInterruptFlag = false;
+            this.pendingIRQFlag = false;
             this.instruction = this.ExecuteNMI();
             this.logInstruction(0x00);
         }
         else if (this.register_OAMDMA != undefined) {
             this.instruction = this.ExecuteOAMDMA();
+            this.logInstruction(0x00);
+        }
+        else if (this.pendingIRQFlag) {
+            this.pendingIRQFlag = false;
+            this.instruction = this.execute_IRQ();
             this.logInstruction(0x00);
         }
         else {
@@ -132,7 +140,9 @@ export class Cpu2A03 {
         if (result.done) {
             this.instruction = undefined;
 
-            //this.nes.logInstruction(this.instructionResult);
+            if (LOG_INSTRUCTIONS) {
+                this.nes.logInstruction(this.instructionResult);
+            }
 
             if (DEBUG_BREAKPOINT_CYCLE != undefined && this.instructionResult.cycles >= DEBUG_BREAKPOINT_CYCLE) {
                 throw new Error("Breakpoint reached");
@@ -184,7 +194,9 @@ export class Cpu2A03 {
 
 
     private logInstruction(instructionOpCode: number) {
-        return;
+        if (!LOG_INSTRUCTIONS) {
+            return;
+        }
 
         const instructionData = instructionMap[instructionOpCode];
         if (!instructionData) {
@@ -249,6 +261,24 @@ export class Cpu2A03 {
         this.register_PC = this.nes.read16(0xFFFE);
 
         this.toggleFlag(this.FLAG_INTERRUPT, true);
+    }
+
+    // IRQ - Interrupt Request
+    * execute_IRQ(): Instruction {
+        const currentPC = this.register_PC;
+
+        yield;
+        yield;
+        this.pushStack(currentPC >> 8);
+        yield;
+        this.pushStack(currentPC & 0xFF);
+        yield;
+        this.pushStack(this.status_flags & ~this.FLAG_BREAK);
+        yield;
+        this.register_PC = this.nes.read16(0xFFFE);
+        this.toggleFlag(this.FLAG_INTERRUPT, true);
+        yield;
+        yield;
     }
 
     // RRA - Rotate Right and Accumulator
@@ -1530,6 +1560,13 @@ export class Cpu2A03 {
         this.pendingNonMaskableInterruptFlag = true;
         //console.log(`NMI triggered on ${numberToHex(this.register_PC)} Instruction: ${this.instructionResult.instructionMetadata?.name}`);
     }
+
+    IRQ() {
+        if ((this.status_flags & this.FLAG_INTERRUPT) == 0) {
+            this.pendingIRQFlag = true;
+        }
+    }
+
 
 
     getInstructionFunc(instructionOpCode: number): Instruction {
