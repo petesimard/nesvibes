@@ -40,7 +40,7 @@ export class Mapper01 extends Cartridge {
             return this.characterRom[address];
         }
         else {
-            return this.programRam[address];
+            return this.characterRam[address];
         }
 
     }
@@ -52,25 +52,8 @@ export class Mapper01 extends Cartridge {
             this.characterRom[address] = value;
         }
         else {
-            this.programRam[address] = value;
+            this.characterRam[address] = value;
         }
-    }
-
-
-    read(address: number): number {
-        if (address >= 0x6000 && address <= 0x7FFF) {
-            const readAddress = (address - 0x6000) % this.programRam.length;
-            return this.programRam[readAddress];
-        }
-        else if (address >= 0x8000 && address <= 0xFFFF) {
-            const readAddress = this.mapROMAddress(address);
-            return this.programRom[readAddress];
-        }
-        else {
-            console.error(`Read from unknown cartridge address: ${numberToHex(address)}`);
-        }
-
-        return 0;
     }
 
     private mapPPUAddress(address: number) {
@@ -129,9 +112,42 @@ export class Mapper01 extends Cartridge {
         throw new Error(`Invalid ROM address: ${numberToHex(address)}`);
     }
 
+
+
+    read(address: number): number {
+        if (address >= 0x6000 && address <= 0x7FFF) {
+            let x = address == 0x6EE9;
+            if (x) {
+                console.log(`MMC1: Read from program RAM: ${numberToHex(address)}`);
+            }
+
+            const readAddress = (address - 0x6000) % this.programRam.length;
+
+            if (x) {
+                console.log(`MMC1: Read from program RAM: ${this.programRam[readAddress]} readAddress: ${readAddress}`);
+            }
+
+            return this.programRam[readAddress];
+        }
+        else if (address >= 0x8000 && address <= 0xFFFF) {
+            const readAddress = this.mapROMAddress(address);
+            return this.programRom[readAddress];
+        }
+        else {
+            console.error(`Read from unknown cartridge address: ${numberToHex(address)}`);
+        }
+
+        return 0;
+    }
+
+
     write(address: number, value: number): void {
         if (address >= 0x6000 && address <= 0x7FFF) {
             const writeAddress = (address - 0x6000) % this.programRam.length;
+
+            if (address == 0x6EE9) {
+                console.log(`MMC1: Write to program RAM: ${numberToHex(address)} = ${numberToHex(value)} writeAddress: ${writeAddress}`);
+            }
             this.programRam[writeAddress] = value;
         }
         else if (address >= 0x8000 && address <= 0xFFFF) {

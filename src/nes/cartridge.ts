@@ -7,6 +7,7 @@ export abstract class Cartridge implements BusDevice {
     programRom: Uint8Array = new Uint8Array();
     programRam: Uint8Array = new Uint8Array(0x2000);
     characterRom: Uint8Array = new Uint8Array();
+    characterRam: Uint8Array = new Uint8Array(0x2000);
     nes: Nes;
     header: CartridgeHeader;
 
