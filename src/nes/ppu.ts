@@ -939,7 +939,7 @@ export class PPU implements BusDevice {
     loadSpriteTiles() {
         const spriteCycle = (this.current_dot - 1) % 8;
 
-        if (spriteCycle == 7) {
+        if (spriteCycle == 4) {
             const spriteNumber = (this.current_dot - 257) >> 3;
 
             const y = this.secondaryOAM[spriteNumber * 4];

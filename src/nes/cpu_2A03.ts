@@ -280,6 +280,7 @@ export class Cpu2A03 {
         yield;
         yield;
 
+        yield* this.noop_loop(5); // why?
     }
 
     // RRA - Rotate Right and Accumulator
