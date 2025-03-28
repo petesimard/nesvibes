@@ -5,7 +5,8 @@ import { NesVibes } from './emulator/emulator';
 
 const nesVibes = new NesVibes(3);
 const rom = "roms/Super Mario Bros. 3 (USA).zip";
-//const rom = "roms/smb1.zip";
+//const rom = "roms/nes-test-roms/mmc3_test/2-details.nes";
+//const rom = "roms/nestest.nes";
 
 (async () => {
     await nesVibes.setup(rom);

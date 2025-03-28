@@ -257,6 +257,8 @@ export class Cpu2A03 {
     // BRK - Break
     * processInstruction_BRK(): Instruction {
         this.pushStack16(this.register_PC + 2);
+        //console.log(`BRK ${numberToHex(this.register_PC + 2)} ${numberToHex(this.status_flags)}`);
+
         this.pushStack(this.status_flags | this.FLAG_BREAK);
         this.register_PC = this.nes.read16(0xFFFE);
 
@@ -266,19 +268,18 @@ export class Cpu2A03 {
     // IRQ - Interrupt Request
     * execute_IRQ(): Instruction {
         const currentPC = this.register_PC;
-
+        this.toggleFlag(this.FLAG_INTERRUPT, true);
         yield;
         yield;
-        this.pushStack(currentPC >> 8);
+        this.pushStack16(currentPC);
         yield;
-        this.pushStack(currentPC & 0xFF);
         yield;
         this.pushStack(this.status_flags & ~this.FLAG_BREAK);
         yield;
         this.register_PC = this.nes.read16(0xFFFE);
-        this.toggleFlag(this.FLAG_INTERRUPT, true);
         yield;
         yield;
+
     }
 
     // RRA - Rotate Right and Accumulator
@@ -1097,6 +1098,7 @@ export class Cpu2A03 {
     * processInstruction_RTI(): Instruction {
         this.status_flags = this.popStack();
         this.register_PC = this.popStack16();
+        //console.log(`RTI ${numberToHex(oldPc)} ${numberToHex(this.register_PC)} ${numberToHex(this.status_flags)}`);
         yield* this.noop_loop(4);
 
         if (this.nes.breakOnRti) {

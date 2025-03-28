@@ -4,6 +4,7 @@ import { Nes } from "./nes";
 import { CartridgeHeader } from "./cartridge_loader";
 
 export abstract class Cartridge implements BusDevice {
+
     programRom: Uint8Array = new Uint8Array();
     programRam: Uint8Array = new Uint8Array(0x2000);
     characterRom: Uint8Array = new Uint8Array();
@@ -36,6 +37,10 @@ export abstract class Cartridge implements BusDevice {
     abstract read(address: number): number;
     abstract write(address: number, value: number): void;
     abstract initialize(): void;
+
+    onA12Clock() {
+        // Used on some mappers to track the A12 line for IRQs
+    }
 
     mapNametableAddress(address: number): number {
         if (this.header.isHorizontalMirroring) {

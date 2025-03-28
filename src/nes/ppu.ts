@@ -85,6 +85,8 @@ export class PPU implements BusDevice {
     internal_secondaryOAM_sprite0: number = -1;
     internal_latched_secondaryOAM_sprite0: number = -1;
     pixelNumber: number = 0;
+    lastA12Value: number = 0; // Used for IRQ tracking in some mappers
+    lastA12Clock: number = 0;
 
     constructor(nes: Nes) {
         this.nes = nes;
@@ -249,6 +251,7 @@ export class PPU implements BusDevice {
                 else {
                     this.register_internal_T = (this.register_internal_T & 0xFF00) | value;
                     this.register_internal_V = this.register_internal_T;
+
                     //console.log(`PPUADDR ${numberToHex(this.register_internal_V)}`);
                 }
                 this.register_internal_W = (this.register_internal_W == 1 ? 0 : 1);
@@ -257,6 +260,7 @@ export class PPU implements BusDevice {
         else if (address == this.register_address_PPUDATA) {
             this.write_internal(this.register_internal_V, value);
             this.register_internal_V += (this.register_PPUCTRL & this.flags_PPUCTRL_VRAM_ADDRESS_INCREMENT) != 0 ? 32 : 1;
+
             //console.log(`PPUDATA WRITE AT ${numberToHex(this.register_internal_V)}`);
         }
     }
@@ -336,6 +340,11 @@ export class PPU implements BusDevice {
             // Pre-render scanline
 
             if (this.isRenderingEnabled()) {
+
+                if (this.current_dot >= 257 && this.current_dot <= 320) {
+                    this.loadSpriteTiles();
+                }
+
                 // Rendering enabled
                 this.renderScanline();
             }
@@ -345,6 +354,7 @@ export class PPU implements BusDevice {
                 // CLear status flags
                 this.register_PPUSTATUS &= ~this.flags_PPUSTATUS_VBLANK & ~this.flags_PPUSTATUS_SPRITE_OVERFLOW & ~this.flags_PPUSTATUS_SPRITE_ZERO_HIT;
                 this.internal_latched_secondaryOAM_sprite0 = -1;
+                //this.onA12Updated(0);
             }
 
             if (this.current_dot >= 257 && this.current_dot <= 320) {
@@ -446,7 +456,6 @@ export class PPU implements BusDevice {
             else if (this.current_dot == 257) {
                 // PPU copies all bits related to horizontal position from t to v
                 this.register_internal_V = (this.register_internal_V & 0x7BE0) | (this.register_internal_T & 0x41F);
-
             }
         }
     }
@@ -487,6 +496,7 @@ export class PPU implements BusDevice {
                 const patternTableAddress = backgroundPatternTableAddress + (this.register_internal_nametableEntry * 16) + fineY;
                 //console.log(`patternTableAddress ${numberToHex(patternTableAddress)} backgroundPatternTableAddress ${numberToHex(backgroundPatternTableAddress)} this.register_internal_nametableEntry ${numberToHex(this.register_internal_nametableEntry)} fineY ${numberToHex(fineY)}`);
                 this.register_internal_tileLow = this.nes.getCartridge().ppu_read(patternTableAddress);
+                this.onA12Updated((patternTableAddress & 0x1000) >> 12);
             }
             else if (((this.current_dot - 1) % 8) == 7) {
                 // Pattern table high byte
@@ -495,6 +505,7 @@ export class PPU implements BusDevice {
 
                 const patternTableAddress = backgroundPatternTableAddress + (this.register_internal_nametableEntry * 16) + fineY + 8;
                 this.register_internal_tileHigh = this.nes.getCartridge().ppu_read(patternTableAddress);
+                this.onA12Updated((patternTableAddress & 0x1000) >> 12);
             }
         }
     }
@@ -807,11 +818,11 @@ export class PPU implements BusDevice {
 
                         const pixelIndex = (imagePixelX + imagePixelY * 256) * 4;
 
-                        const finalColor = this.bitsToColor(value);
+                        const finalColor = value * 85;
 
-                        image.data[pixelIndex] = finalColor[0];
-                        image.data[pixelIndex + 1] = finalColor[1];
-                        image.data[pixelIndex + 2] = finalColor[2];
+                        image.data[pixelIndex] = finalColor;
+                        image.data[pixelIndex + 1] = finalColor;
+                        image.data[pixelIndex + 2] = finalColor;
                         image.data[pixelIndex + 3] = 255;
                     }
                 }
@@ -843,6 +854,7 @@ export class PPU implements BusDevice {
             this.internal_oam_N = 0;
             this.internal_oam_M = -1;
             this.internal_secondaryOAM_sprite0 = -1;
+            this.lastA12Value = 0;
 
         }
         else if (this.current_dot == 321) {
@@ -937,6 +949,7 @@ export class PPU implements BusDevice {
 
             if (y == 0xFF) {
                 this.sprites_xPos[spriteNumber] = -1;
+                this.onA12Updated(1);
                 return;
             }
 
@@ -978,10 +991,26 @@ export class PPU implements BusDevice {
 
             const patternTableLowAddress = patternPatternTableAddress + (tile * 16) + fineY;
             this.sprites_tiles_low[spriteNumber] = this.nes.getCartridge().ppu_read(patternTableLowAddress);
+            this.onA12Updated((patternTableLowAddress & 0x1000) >> 12);
 
             const patternTableHighAddress = patternPatternTableAddress + (tile * 16) + fineY + 8;
             this.sprites_tiles_high[spriteNumber] = this.nes.getCartridge().ppu_read(patternTableHighAddress);
-
+            this.onA12Updated((patternTableHighAddress & 0x1000) >> 12);
         }
+    }
+
+    onA12Updated(value: number) {
+        const oldValue = this.lastA12Value;
+        //console.log(`onA12Updated ${value} oldValue ${oldValue} ${this.nes.cycles - this.lastA12Clock}`);
+
+        if (oldValue == 0 && value == 1 && this.nes.cycles - this.lastA12Clock > 7) {
+            this.nes.getCartridge().onA12Clock();
+        }
+
+        if (oldValue == 0 && value == 1) {
+            this.lastA12Clock = this.nes.cycles;
+        }
+
+        this.lastA12Value = value;
     }
 }

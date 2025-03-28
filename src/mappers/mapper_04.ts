@@ -6,8 +6,11 @@ export class Mapper04 extends Cartridge {
     prgRomBankMode: number = 0;
     chrInversion: number = 0;
     nametableArrangement: number = 0;
-
     bankRegisters: number[] = [];
+    irqCounterReload: number = 0;
+    irqCounter: number = 0;
+    irqPendingReload: boolean = false;
+    irqEnabled: boolean = false;
 
 
     initialize(): void {
@@ -76,6 +79,24 @@ export class Mapper04 extends Cartridge {
         else if (address >= 0xA000 && address <= 0xBFFF && isEven) {
             // Nametable arrangement
             this.nametableArrangement = (value & 1);
+        }
+        else if (address >= 0xC000 && address <= 0xDFFF && isEven) {
+            // IRQ Latch
+            this.irqCounterReload = value;
+        }
+        else if (address >= 0xC001 && address <= 0xDFFF && !isEven) {
+            // IRQ Reload
+            this.irqCounter = 0;
+            this.irqPendingReload = true;
+        }
+        else if (address >= 0xE000 && address <= 0xFFFE && isEven) {
+            // IRQ Disable
+            this.irqEnabled = false;
+            // todo acknowledge pending irq
+        }
+        else if (address >= 0xE001 && address <= 0xFFFF && !isEven) {
+            // IRQ Enable
+            this.irqEnabled = true;
         }
     }
 
@@ -207,4 +228,18 @@ export class Mapper04 extends Cartridge {
         return address;
     }
 
+    onA12Clock() {
+        let isCounter0 = this.irqCounter <= 0;
+        if (isCounter0 || this.irqPendingReload) {
+            this.irqCounter = this.irqCounterReload;
+            this.irqPendingReload = false;
+        }
+        else {
+            this.irqCounter--;
+        }
+
+        if (this.irqCounter <= 0 && this.irqEnabled) {
+            this.nes.getCpu().IRQ();
+        }
+    }
 }

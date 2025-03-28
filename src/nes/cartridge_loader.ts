@@ -1,6 +1,6 @@
 import JSZip from "jszip";
 import { Nes } from "./nes";
-import { bytesToHex } from "../emulator/utils";
+import { bytesToHex, numberToHex } from "../emulator/utils";
 import { Cartridge } from "./cartridge";
 
 import { Mapper00 } from "../mappers/mapper_00";
@@ -69,7 +69,7 @@ export class CartridgeLoader {
             }
         }
 
-        throw new Error('Invalid ROM format');
+        throw new Error(`Invalid ROM format Length: ${rom.length} 0: ${numberToHex(rom[0])} 1: ${numberToHex(rom[1])} 2: ${numberToHex(rom[2])} 3: ${numberToHex(rom[3])}`);
     }
 }
 

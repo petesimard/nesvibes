@@ -462,7 +462,11 @@ export class NesVibes {
     }
 
     async loadROMFromURL(url: string) {
-        const response = await fetch(url);
+        const response = await fetch(url, {
+            headers: {
+                'Accept': 'application/octet-stream'
+            }
+        });
         const arrayBuffer = await response.arrayBuffer();
         const uint8Array = new Uint8Array(arrayBuffer);
 
