@@ -1,34 +1,55 @@
-# P5.js with TypeScript
+# NESVibes - A Cycle-Accurate NES Emulator in TypeScript
 
-A simple P5.js project setup with TypeScript support.
+NESVibes is a Nintendo Entertainment System (NES) emulator written in TypeScript that aims to provide cycle-accurate emulation of the original hardware. The emulator strives to replicate the behavior of the NES at the hardware level, ensuring accurate timing.
 
-## Setup
+# What's working
 
-1. Install dependencies:
+- CPU
+- PPU 
+- Cartridge loading
+- Mapper 0, 1, 4
+
+# What's not working
+
+- Other mappers
+- APU
+- Some MMC3 games have improper IRQ timing
+
+## Development
+
+This project is built using:
+
+- TypeScript for type-safe code
+- Modern web technologies
+- TailwindCSS for styling
+
+## Building and Running
+
 ```bash
+# Install dependencies
 npm install
-```
 
-2. Start the development server:
-```bash
+# Start development server
 npm run dev
-```
 
-3. Build for production:
-```bash
+# Build for production
 npm run build
 ```
 
-## Project Structure
+## Contributing
 
-- `src/main.ts`: Main sketch file
-- `index.html`: HTML entry point
-- `tsconfig.json`: TypeScript configuration
-- `vite.config.ts`: Vite configuration
+Contributions are welcome! Please feel free to submit pull requests, report bugs, or suggest features.
 
-## Features
+## License
 
-- P5.js with TypeScript support
-- Hot Module Replacement (HMR)
-- Modern build setup with Vite
-- Type checking and IntelliSense 
+This project is licensed under the MIT License - see the LICENSE file for details.
+
+## Acknowledgments
+
+- Thanks to the NES dev community for their extensive documentation
+- Special thanks to the authors of various technical documents about NES hardware
+- Inspired by other cycle-accurate emulators in the community
+
+## Status
+
+This is an active project under development. While many features are implemented and working, there's always room for improvement in accuracy and compatibility. 
