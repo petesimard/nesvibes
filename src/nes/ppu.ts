@@ -938,6 +938,7 @@ export class PPU implements BusDevice {
 
     loadSpriteTiles() {
         const spriteCycle = (this.current_dot - 1) % 8;
+        const is8x16 = (this.register_PPUCTRL & this.flags_PPUCTRL_SPRITE_SIZE) != 0;
 
         if (spriteCycle == 4) {
             const spriteNumber = (this.current_dot - 257) >> 3;
@@ -954,6 +955,11 @@ export class PPU implements BusDevice {
             }
 
             let fineY = this.current_scanline - y;
+
+            if ((attribute & 0x80) != 0) {
+                fineY = (is8x16 ? 15 : 7) - fineY;
+            }
+
             let bottomSprite = false;
 
             if (fineY > 7) {
@@ -965,7 +971,6 @@ export class PPU implements BusDevice {
             this.sprites_xPos[spriteNumber] = x;
             this.sprites_tiles_attributes[spriteNumber] = attribute;
 
-            const is8x16 = (this.register_PPUCTRL & this.flags_PPUCTRL_SPRITE_SIZE) != 0;
 
             let patternTableNumber = 0;
             if (is8x16) {
@@ -983,9 +988,6 @@ export class PPU implements BusDevice {
 
             const patternPatternTableAddress = patternTableNumber == 0 ? this.address_PATTERNTABLE_0 : this.address_PATTERNTABLE_1;
 
-            if ((attribute & 0x80) != 0) {
-                fineY = 7 - fineY;
-            }
 
             //console.log(`spriteNumber ${spriteNumber} fineY ${fineY} yScroll ${this.yScroll()} y ${y} tile ${tile} patternTableNumber ${patternTableNumber} patternPatternTableAddress ${patternPatternTableAddress}`);
 
