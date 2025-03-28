@@ -28,13 +28,16 @@ export class Nes {
     public CPU_BUSADDRESS_REGISTER_A: number = 0xFFFFFF + 1;
     _isPaused: any;
     breakOnNmi: boolean = false;
+    public overscan: boolean = false;
 
-
-    constructor(logger: (message: string) => void,
+    constructor(
+        overscan: boolean,
+        logger: (message: string) => void,
         instructionLogger: (instruction: InstructionResult) => void,
         latchControllerStates: () => void,
         getControllerState: (controllerNumber: number) => number,
     ) {
+        this.overscan = overscan;
         this.logger = logger;
         this.instructionLogger = instructionLogger;
         this.getControllerState = getControllerState;

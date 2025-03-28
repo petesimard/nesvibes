@@ -7,7 +7,7 @@ export class PPU implements BusDevice {
 
     private nes: Nes;
 
-    private vram: Uint8Array = new Uint8Array(2048); // 2KB for nametables
+    private vram: Uint8Array = new Uint8Array(4048); // 4KB for nametables
     private OAM: Uint8Array = new Uint8Array(256); // 256 bytes for OAM
     private secondaryOAM: Uint8Array = new Uint8Array(32); // 32 bytes for secondary OAM
     private palette: Uint8Array = new Uint8Array(32);
@@ -500,6 +500,7 @@ export class PPU implements BusDevice {
     }
 
     renderPixel() {
+
         // Background
         const pixelX = ((this.current_dot - 1) % 8) + this.register_internal_X;
 
@@ -598,10 +599,13 @@ export class PPU implements BusDevice {
         const paletteAddress = 0x3F00 | paletteIndex;
         const palette = this.read_internal(paletteAddress);
 
+
+        if (this.nes.overscan && (this.current_scanline > 239 || this.current_scanline < 8)) {
+            return;
+        }
+
+
         const finalColor = this.bitsToColor(palette);
-
-
-
         const index = (this.pixelNumber) * 4
         this.nes.outputBuffer[index] = finalColor[0];
         this.nes.outputBuffer[index + 1] = finalColor[1];

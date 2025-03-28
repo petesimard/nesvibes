@@ -111,6 +111,7 @@ export class NesVibes {
     controller1LatchedState: number = 0;
     controllerReadIndex: number = 0;
     lastFrameTime: number = 0;
+    overscan: boolean = true;
 
     constructor(scale: number = 1) {
         this.scale = scale;
@@ -118,7 +119,7 @@ export class NesVibes {
         const sketch = (p5: P5) => {
             p5.setup = () => {
                 const canvas = document.getElementById('canvas')!;
-                p5.createCanvas(256 * scale, 240 * scale).parent(canvas);
+                p5.createCanvas(256 * scale, (240 - (this.overscan ? 16 : 0)) * scale).parent(canvas);
                 p5.background(0);
                 p5.frameRate(60);
             };
@@ -140,20 +141,21 @@ export class NesVibes {
         }
 
         this.p5 = new P5(sketch);
-        this.nes = new Nes((message: string) => {
-            if (!logContainer)
-                return;
+        this.nes = new Nes(this.overscan,
+            (message: string) => {
+                if (!logContainer)
+                    return;
 
-            logMessages.push(message);
-            if (logMessages.length > 50000) {
-                logMessages.shift();
-            }
+                logMessages.push(message);
+                if (logMessages.length > 50000) {
+                    logMessages.shift();
+                }
 
-            if (!this.nes.isPaused())
-                return;
+                if (!this.nes.isPaused())
+                    return;
 
-            this.updateLogWindow();
-        },
+                this.updateLogWindow();
+            },
             (instruction: InstructionResult) => {
                 instructionLogMessages.add(instruction);
             },
@@ -162,7 +164,7 @@ export class NesVibes {
             getControllerState,
         );
 
-        this.frameBufferImage = this.p5.createImage(256, 240);
+        this.frameBufferImage = this.p5.createImage(256, 240 - (this.overscan ? 16 : 0));
 
         this.nes.onPausedListeners.push(() => {
             this.updateDebug();

@@ -37,12 +37,8 @@ export abstract class Cartridge implements BusDevice {
     abstract write(address: number, value: number): void;
     abstract initialize(): void;
 
-    public isHorizontalMirroring(): boolean {
-        return this.header.isHorizontalMirroring;
-    }
-
     mapNametableAddress(address: number): number {
-        if (this.isHorizontalMirroring()) {
+        if (this.header.isHorizontalMirroring) {
             // Horizontal mirroring
             if (address < 0x2400) {
                 // Left nametable

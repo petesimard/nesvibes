@@ -116,17 +116,7 @@ export class Mapper01 extends Cartridge {
 
     read(address: number): number {
         if (address >= 0x6000 && address <= 0x7FFF) {
-            let x = address == 0x6EE9;
-            if (x) {
-                console.log(`MMC1: Read from program RAM: ${numberToHex(address)}`);
-            }
-
             const readAddress = (address - 0x6000) % this.programRam.length;
-
-            if (x) {
-                console.log(`MMC1: Read from program RAM: ${this.programRam[readAddress]} readAddress: ${readAddress}`);
-            }
-
             return this.programRam[readAddress];
         }
         else if (address >= 0x8000 && address <= 0xFFFF) {
@@ -144,10 +134,6 @@ export class Mapper01 extends Cartridge {
     write(address: number, value: number): void {
         if (address >= 0x6000 && address <= 0x7FFF) {
             const writeAddress = (address - 0x6000) % this.programRam.length;
-
-            if (address == 0x6EE9) {
-                console.log(`MMC1: Write to program RAM: ${numberToHex(address)} = ${numberToHex(value)} writeAddress: ${writeAddress}`);
-            }
             this.programRam[writeAddress] = value;
         }
         else if (address >= 0x8000 && address <= 0xFFFF) {
@@ -188,10 +174,10 @@ export class Mapper01 extends Cartridge {
             this.prgRomBankMode = (shift_register & 0xC) >> 2;
             this.chrRomBankMode = (shift_register & 0x10) >> 4;
 
-            console.log(`MMC1: Control register updated: ${numberToHex(shift_register)}`);
-            console.log(`MMC1: Nametable arrangement: ${this.nametableArrangement}`);
-            console.log(`MMC1: PRG ROM bank mode: ${this.prgRomBankMode}`);
-            console.log(`MMC1: CHR ROM bank mode: ${this.chrRomBankMode}`);
+            // console.log(`MMC1: Control register updated: ${numberToHex(shift_register)}`);
+            // console.log(`MMC1: Nametable arrangement: ${this.nametableArrangement}`);
+            // console.log(`MMC1: PRG ROM bank mode: ${this.prgRomBankMode}`);
+            // console.log(`MMC1: CHR ROM bank mode: ${this.chrRomBankMode}`);
         }
         else if (address >= 0xA000 && address <= 0xBFFF) {
             // CHR bank 0 

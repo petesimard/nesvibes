@@ -5,6 +5,7 @@ import { Cartridge } from "./cartridge";
 
 import { Mapper00 } from "../mappers/mapper_00";
 import { Mapper01 } from "../mappers/mapper_01";
+import { Mapper04 } from "../mappers/mapper_04";
 
 export class CartridgeLoader {
     constructor(private nes: Nes) {
@@ -26,6 +27,9 @@ export class CartridgeLoader {
                 break;
             case 1:
                 MapperClass = Mapper01;
+                break;
+            case 4:
+                MapperClass = Mapper04;
                 break;
             default:
                 throw new Error(`Unsupported mapper number: ${header.mapperNumber}`);
@@ -75,6 +79,7 @@ export class CartridgeHeader {
     prgRomSize: number = 0;
     chrRomSize: number = 0;
     prgRamSize: number = 0;
+    alternativeNametableLoyout: boolean = false;
     isHorizontalMirroring: boolean = false;
 
     constructor(private rom: Uint8Array) {
@@ -93,6 +98,7 @@ export class CartridgeHeader {
         const flags6 = header[6];
 
         this.isHorizontalMirroring = (flags6 & 0x01) == 0;
+        this.alternativeNametableLoyout = (flags6 & 0x08) == 0;
 
         const flags7 = header[7];
 
