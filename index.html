@@ -19,12 +19,50 @@
             overflow-y: auto;
             font-size: 12px;
         }
+
+        .emulator-container {
+            height: 100vh;
+            width: calc(1024 * (100vh / 1257));
+            position: relative;
+        }
+
+        .emulator-container-img {
+            position: absolute;
+            top: 0;
+            left: 0;
+            max-width: 100%;
+            height: 100vh;
+        }
+
+        .emulator-container-img-black {
+            position: absolute;
+            top: 0;
+            left: 0;
+            max-width: 100%;
+            height: 100vh;
+        }
+
+        .emulator-canvas-container {
+            position: absolute;
+            top: 30%;
+            left: 50%;
+            width: 73%;
+            height: 47%;
+            transform: translate(-50%, -50%);
+            background-color: black;
+        }
     </style>
 </head>
 
 <body class="m-0 p-5 min-h-screen bg-[#001010] flex flex-col gap-5">
     <div class="flex gap-5">
-        <div id="canvas"></div>
+        <div class="emulator-container">
+            <img src="images/screen_overlay_black.png" class="emulator-container-img-black" alt="NESVibes" />
+            <div class="emulator-canvas-container">
+                <div id="canvas"></div>
+            </div>
+            <img src="images/screen_overlay.png" class="emulator-container-img" alt="NESVibes" />
+        </div>
 
         <div class="flex-grow bg-black/80 rounded-lg p-4 text-white font-mono h-[400px]">
             <div class="flex flex-wrap gap-2.5 mb-4">
