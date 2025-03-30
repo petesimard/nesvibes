@@ -113,17 +113,20 @@ export class NesVibes {
     lastFrameTime: number = 0;
     overscan: boolean = true;
 
-    constructor(scale: number = 1) {
-        this.scale = scale;
+    constructor() {
+        const nesVibesScreen = document.getElementById('nesVibesScreen')!;
+        const screenWidth = nesVibesScreen.clientWidth;
+        this.scale = screenWidth / 256;
 
         const sketch = (p5: P5) => {
             p5.setup = () => {
                 const canvas = document.getElementById('canvas')!;
-                p5.createCanvas(256 * scale, (240 - (this.overscan ? 16 : 0)) * scale).parent(canvas);
+                p5.createCanvas(256 * this.scale, (240 - (this.overscan ? 16 : 0)) * this.scale).parent(canvas);
                 p5.background(0);
                 p5.frameRate(60);
             };
         };
+
 
         document.addEventListener('keydown', this.handleKeyDown);
         document.addEventListener('keyup', this.handleKeyUp);
@@ -165,6 +168,11 @@ export class NesVibes {
         );
 
         this.frameBufferImage = this.p5.createImage(256, 240 - (this.overscan ? 16 : 0));
+
+
+        this.p5.windowResized = () => {
+            this.setCanvasSize();
+        }
 
         this.nes.onPausedListeners.push(() => {
             this.updateDebug();
@@ -221,6 +229,13 @@ export class NesVibes {
 
     }
 
+
+    private setCanvasSize() {
+        const nesVibesScreen = document.getElementById('nesVibesScreen')!;
+        const screenWidth = nesVibesScreen.clientWidth;
+        this.scale = screenWidth / 256;
+        this.p5.resizeCanvas(256 * this.scale, (240 - (this.overscan ? 16 : 0)) * this.scale);
+    }
 
     private updateDebug() {
         this.updateDebugDisplay();
