@@ -318,7 +318,6 @@ export class NesVibes {
             this.p5.background(0);
             this.p5.scale(this.scale).noSmooth();
 
-            //this.frameBufferImage.loadPixels();
             this.nes.outputBuffer = this.frameBufferImage.pixels;
 
             while (!this.nes.frameReady && !this.nes.isPaused()) {
@@ -351,7 +350,7 @@ export class NesVibes {
             this.p5.noStroke();
             this.p5.textAlign(this.p5.RIGHT, this.p5.TOP);
             this.p5.textSize(5);
-            this.p5.text(`FPS: ${this.cachedFps}`, (this.p5.width / this.scale) - 2, 2);
+            this.p5.text(`FPS: ${this.cachedFps}`, (this.p5.width / this.scale) - 20, 20);
 
             this.nes.frameReady = false;
             this.lastFrameTime = currentTime;

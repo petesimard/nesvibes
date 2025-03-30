@@ -6,6 +6,8 @@ import { numberToHex } from "../emulator/utils";
 import { APU } from "./apu";
 import { CartridgeLoader } from "./cartridge_loader";
 
+const APU_ENABLED = true;
+
 export class Nes {
     private cpu: Cpu2A03;
     private cartridge: Cartridge | undefined;
@@ -46,12 +48,17 @@ export class Nes {
         this.ram = new RAM(this, 2048);
         this.ram = new RAM(this, 2048);
         this.ppu = new PPU(this);
-        //this.apu = new APU(this);
+
+        if (APU_ENABLED) {
+            this.apu = new APU(this);
+        }
         this.cartridgeLoader = new CartridgeLoader(this);
     }
 
     async initialize() {
-        //await this.apu.initialize();
+        if (APU_ENABLED) {
+            await this.apu!.initialize();
+        }
     }
 
     public isPaused(): boolean {
@@ -101,7 +108,9 @@ export class Nes {
     onReset() {
         this.cpu.onReset();
         this.ppu.onReset();
-        //this.apu.onReset();
+        if (APU_ENABLED) {
+            this.apu!.onReset();
+        }
         this.cycles = 0;
         this.frameReady = false;
     }
@@ -118,7 +127,9 @@ export class Nes {
 
             if (i == 2) {
                 this.cpu.clock();
-                //this.apu.clock();
+                if (APU_ENABLED) {
+                    this.apu!.clock();
+                }
             }
         }
     }
@@ -192,7 +203,9 @@ export class Nes {
             return this.ppu.read(address);
         }
         else if ((address >= 0x4000 && address <= 0x4013) || address >= 0x4015 || address <= 0x4017) {
-            //return this.apu.read(address);
+            if (APU_ENABLED) {
+                return this.apu!.read(address);
+            }
         }
 
         console.error(`Read from unknown address: ${numberToHex(address)}`);
@@ -230,7 +243,9 @@ export class Nes {
             this.cpu.setOAMDMA(value);
         }
         else if ((address >= 0x4000 && address <= 0x4013) || address >= 0x4015 || address <= 0x4017) {
-            //this.apu.write(address, value);
+            if (APU_ENABLED) {
+                this.apu!.write(address, value);
+            }
         }
         else {
             throw new Error(`Write to unknown address: ${numberToHex(address)}`);

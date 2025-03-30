@@ -1,5 +1,6 @@
 export class AudioManager {
-    private audioContext: AudioContext | null = null;
+    public audioContext: AudioContext | null = null;
+
     private audioWorklet: AudioWorkletNode | null = null;
     private isInitialized = false;
     private sampleBuffer: number[] = [];
@@ -13,6 +14,11 @@ export class AudioManager {
                 sampleRate: 32100,
                 latencyHint: 'interactive'
             });
+
+            // Ensure the context is resumed after user interaction
+            if (this.audioContext.state === 'suspended') {
+                await this.audioContext.resume();
+            }
 
             await this.audioContext.audioWorklet.addModule('/src/audio/nes-audio-processor.ts');
 
@@ -36,7 +42,6 @@ export class AudioManager {
 
         this.sampleBuffer.push(sample);
 
-        // Send samples in batches
         if (this.sampleBuffer.length >= this.BUFFER_SIZE) {
             this.audioWorklet.port.postMessage({
                 type: 'samples',

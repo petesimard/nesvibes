@@ -74,6 +74,16 @@
             z-index: 1000;
         }
 
+        .playButton {
+            position: absolute;
+            top: 43%;
+            left: 33.6%;
+            width: 47%;
+            height: 72%;
+            transform: translate(-50%, -50%);
+            background-color: #00000000;
+        }
+
         .emulator-canvas-container {
             position: absolute;
             top: 19%;
@@ -101,7 +111,7 @@
 </head>
 
 <body class="m-0 p-5 min-h-screen flex flex-col gap-5">
-    <div x-data="{ }">
+    <div x-data="{ showPlayButton: true }">
         <img src="images/logo.png" class="logo" alt="NESVibes" />
 
         <div class="bg-blue-900/80 rounded-lg p-4 text-white font-mono hints">
@@ -139,6 +149,12 @@
                 <div id="canvas"></div>
             </div>
             <img src="images/screen_overlay.png" class="emulator-container-img" alt="NESVibes" />
+
+            <button x-show="showPlayButton" @click="startEmulator(); showPlayButton = false"
+                class="playButton flex items-center justify-center z-[10000] max-w-[200px]">
+                <img src="images/play.png" class="play-button" alt="Play" />
+            </button>
+
             <button class="nes-btn btn-primary" id="nesVibesScreen-btn" @click="console.log('clicked')">Load
                 ROM</button>
         </div>

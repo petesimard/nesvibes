@@ -1,5 +1,7 @@
+import { Nes } from "../nes";
+
 export abstract class APUChannel {
-    constructor() {
+    constructor(protected nes: Nes) {
 
     }
 

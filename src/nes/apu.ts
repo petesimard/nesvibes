@@ -29,23 +29,30 @@ export class APU implements BusDevice {
         this.cyclesPerSample = Math.floor(1789773 / this.sampleRate / 1);
         this.cyclesToNextSample = this.cyclesPerSample;
 
-        this.channel_pulse1 = new ChannelPulse();
-        this.channel_pulse2 = new ChannelPulse();
+        this.channel_pulse1 = new ChannelPulse(nes, 0);
+        this.channel_pulse2 = new ChannelPulse(nes, 1);
 
         window.addEventListener('beforeunload', () => {
             this.dispose();
         });
     }
 
+    getAudioContext(): AudioContext {
+        return this.audioManager.audioContext!;
+    }
+
     async initialize() {
         await this.audioManager.initialize();
+        await this.channel_pulse1.initialize();
+        await this.channel_pulse2.initialize();
+        console.log("APU initialized");
     }
 
     clock() {
         this.cyclesToNextSample--;
         if (this.cyclesToNextSample <= 0) {
             const output = this.sampleTotal / this.sampleCount;
-            this.audioManager.pushSample(output);
+            //this.audioManager.pushSample(output);
             this.sampleTotal = 0;
             this.sampleCount = 0;
             this.cyclesToNextSample = this.cyclesPerSample;
@@ -68,7 +75,7 @@ export class APU implements BusDevice {
 
         if (this.sequencerMode4step()) {
             // 1/4 frame
-            if (this.apu_clock % 3729 == 0 || this.apu_clock % 7457 == 0 || this.apu_clock % 11186 == 0 || this.apu_clock % 14915 == 0) {
+            if (this.apu_clock % 3729 == 0) {
                 if (this.channel_pulse1.isEnabled) {
                     this.channel_pulse1.quarter_clock();
                 }
@@ -78,7 +85,7 @@ export class APU implements BusDevice {
             }
 
             // 1/2 frame
-            if (this.apu_clock % 7457 == 0 || this.apu_clock % 14915 == 0) {
+            if (this.apu_clock % 7457 == 0) {
                 if (this.channel_pulse1.isEnabled) {
                     this.channel_pulse1.half_clock();
                 }
@@ -89,13 +96,13 @@ export class APU implements BusDevice {
 
             // IRQ
             if (this.apu_clock % 14915 == 0 && (this.register_status & 0x40) == 0) {
-                this.nes.getCpu().IRQ();
+                //this.nes.getCpu().IRQ(); // TODO: Implement IRQ
             }
 
         }
         else {// 5 step
             // 1/4 frame
-            if (this.apu_clock % 3729 == 0 || this.apu_clock % 7457 == 0 || this.apu_clock % 11186 == 0 || this.apu_clock % 18641 == 0) {
+            if (this.apu_clock % 3729 == 0) {
                 if (this.channel_pulse1.isEnabled) {
                     this.channel_pulse1.quarter_clock();
                 }
@@ -105,7 +112,7 @@ export class APU implements BusDevice {
             }
 
             // 1/2 frame
-            if (this.apu_clock % 7457 == 0 || this.apu_clock % 18641 == 0) {
+            if (this.apu_clock % 7457 == 0) {
                 if (this.channel_pulse1.isEnabled) {
                     this.channel_pulse1.half_clock();
                 }
