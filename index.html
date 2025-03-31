@@ -171,7 +171,7 @@
                     </svg>
                 </button>
                 <div class="text-white font-mono text-xl mb-6">Select a ROM</div>
-                <div class="overflow-x-auto bg-black">
+                <div class="overflow-x-auto bg-black scroll-smooth">
                     <div class="flex gap-6 p-4">
                         <template x-for="rom in roms" :key="rom.url">
                             <div class="flex-shrink-0">
@@ -380,7 +380,7 @@
                         cover: '/images/covers/rygar.jpg'
                     }, {
                         name: 'TMNT',
-                        url: '/r/TMNT (USA).nes',
+                        url: '/r/Teenage Mutant Ninja Turtles (USA).zip',
                         cover: '/images/covers/tmnt.jpg'
                     }, {
                         name: '1942',
@@ -407,6 +407,11 @@
                         url: '/r/Tennis.nes',
                         cover: '/images/covers/tennis.jpg'
                     },
+                    {
+                        name: 'Contra',
+                        url: '/r/Contra (USA).zip',
+                        cover: '/images/covers/contra.jpg'
+                    }
                 ]
             }))
         })
