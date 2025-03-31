@@ -4,7 +4,6 @@ import { APUChannel } from "./apu_channel";
 
 export class ChannelPulse extends APUChannel {
 
-    private audioContext!: AudioContext;
     private volume: number = 0;
     private constantVolume: boolean = false;
     private lengthCounterHalt: boolean = false;
@@ -12,7 +11,6 @@ export class ChannelPulse extends APUChannel {
     private timer: number = 0;
     private timerLength: number = 0;
     private oscillator: OscillatorNode | null = null;
-    private gainNode: GainNode | null = null;
 
     private timerLow: number = 0;
     private lengthCounter: number = 0;
@@ -36,19 +34,20 @@ export class ChannelPulse extends APUChannel {
         12, 16, 24, 18, 48, 20, 96, 22, 192, 24, 72, 26, 16, 28, 32, 30
     ];
     lastFrequency: number = 0;
-    lastGain: number = 0;
+
     constructor(protected nes: Nes, private channelNumber: number) {
         super(nes);
     }
 
+
     async initialize() {
-        this.audioContext = this.nes.getApu()!.getAudioContext();
+        super.initialize();
         this.oscillator = this.audioContext.createOscillator();
         this.oscillator.type = 'square';
         this.gainNode = this.audioContext.createGain();
-        this.oscillator.connect(this.gainNode);
         this.gainNode.connect(this.audioContext.destination);
-        this.gainNode.gain.setValueAtTime(0, this.audioContext.currentTime);
+        this.setGain(0);
+        this.oscillator.connect(this.gainNode);
         this.oscillator.start();
     }
 
@@ -66,53 +65,26 @@ export class ChannelPulse extends APUChannel {
     }
 
     private updateFrequency(): void {
-        // Muting conditions:
-        // 1. Period < 8
-        // 2. Period > 0x7FF
-        // 3. Target period would overflow
-        let shouldMute = this.timerLength < 8 || this.timerLength > 0x7FF;
+        // First check muting conditions independently of sweep
+        if (this.timerLength < 8 || !this.isEnabled || this.lengthCounter <= 0) {
+            this.setGain(0);
+            return;
+        }
 
-        // Calculate target period for muting check
+        // Check sweep-based muting condition
         if (this.sweepEnabled && this.sweepShift > 0) {
             const changeAmount = this.timerLength >> this.sweepShift;
             const targetPeriod = !this.sweepNegate ?
                 this.timerLength + changeAmount :
                 this.timerLength - changeAmount - (this.channelNumber === 1 ? 1 : 0);
 
-            shouldMute = shouldMute || targetPeriod > 0x7FF;
-        }
-
-        if (shouldMute) {
-            if (this.gainNode && this.lastGain !== 0) {
-                this.lastGain = 0;
-                this.gainNode.gain.setValueAtTime(0, this.audioContext.currentTime);
+            if (targetPeriod > 0x7FF) {
+                this.setGain(0);
                 return;
             }
         }
 
-        // Calculate sweep target period
-        let targetPeriod = this.timerLength;
-        if (this.sweepEnabled && this.sweepShift > 0) {
-            const changeAmount = this.timerLength >> this.sweepShift;
-            targetPeriod = this.sweepNegate ?
-                (this.channelNumber === 1 ?
-                    this.timerLength - changeAmount - 1 :
-                    this.timerLength - changeAmount) :
-                this.timerLength + changeAmount;
-
-            // Mute the channel if the target period is out of range
-            if (targetPeriod > 0x7FF || this.timerLength < 8) {
-                if (this.gainNode && this.lastGain !== 0) {
-                    this.lastGain = 0;
-                    this.gainNode.gain.setValueAtTime(0, this.audioContext.currentTime);
-                    return;
-                }
-            }
-        }
-
-        // NES CPU clock rate is 1.789773 MHz
-        // Timer value is decremented at this rate
-        // Frequency = CPU_CLOCK_RATE / (16 * (timer + 1))
+        // Calculate frequency only if not muted
         const frequency = 1789773 / (16 * (this.timerLength + 1));
 
         if (this.oscillator && this.lastFrequency !== frequency && this.gainNode) {
@@ -122,9 +94,8 @@ export class ChannelPulse extends APUChannel {
 
         // Update gain based on envelope volume
         const envelopeVolume = this.constantVolume ? this.volume : this.envelopeDecayLevel;
-        if (this.gainNode && this.lastGain !== envelopeVolume) {
-            this.lastGain = envelopeVolume;
-            this.gainNode.gain.setValueAtTime(envelopeVolume / 15, this.audioContext.currentTime);
+        if (this.lastGain !== envelopeVolume) {
+            this.setGain(envelopeVolume / 15);
         }
     }
 
@@ -225,63 +196,61 @@ export class ChannelPulse extends APUChannel {
 
     updateEnvelope() {
         const envelopeVolume = this.constantVolume ? this.volume : this.envelopeDecayLevel;
-        if (this.gainNode && this.lastGain !== envelopeVolume) {
-            this.lastGain = envelopeVolume;
-            this.gainNode.gain.setValueAtTime(envelopeVolume, this.audioContext.currentTime);
-            //console.log(`channel ${this.channelNumber} gain: 0`);
-        }
+        this.setGain(envelopeVolume / 15);
     }
 
     half_clock(): void {
         if (this.lengthCounter > 0 && !this.lengthCounterHalt) {
             this.lengthCounter--;
-            //console.log(`channel ${this.channelNumber} lengthCounter: ${this.lengthCounter} this.lengthCounterHalt: ${this.lengthCounterHalt}`);
         }
 
 
-        if (this.timerLength < 8 || !this.isEnabled || (this.lengthCounter <= 0 && !this.lengthCounterHalt)) {
-            if (this.gainNode && this.lastGain !== 0) {
-                this.lastGain = 0;
-                this.gainNode.gain.setValueAtTime(0, this.audioContext.currentTime);
-                //console.log(`channel ${this.channelNumber} gain: 0`);
-            }
+        if (this.isHalted()) {
+            this.setGain(0);
         }
     }
 
+    isHalted(): boolean {
+        return (this.timerLength < 8 || this.timerLength > 0x7FF || !this.isEnabled || (this.lengthCounter <= 0 && !this.lengthCounterHalt));
+    }
+
     private updateSweep(): void {
-        // Update divider
+        // Only process if sweep is enabled and shift count is non-zero
+        if (!this.sweepEnabled || this.sweepShift === 0) {
+            return;
+        }
+
         if (this.sweepReload) {
             this.sweepDivider = this.sweepPeriod;
             this.sweepReload = false;
         } else if (this.sweepDivider > 0) {
             this.sweepDivider--;
+            return; // Don't update period unless divider reaches 0
         } else {
             this.sweepDivider = this.sweepPeriod;
+        }
 
-            // Only update period if sweep is enabled and shift count is non-zero
-            if (this.sweepEnabled && this.sweepShift > 0) {
-                const changeAmount = this.timerLength >> this.sweepShift;
+        // Calculate change amount
+        const changeAmount = this.timerLength >> this.sweepShift;
 
-                // Different negation behavior for pulse 1 and 2
-                let newTimer;
-                if (this.sweepNegate) {
-                    if (this.channelNumber === 1) {
-                        // Pulse 1: ones' complement (−c − 1)
-                        newTimer = this.timerLength - changeAmount - 1;
-                    } else {
-                        // Pulse 2: two's complement (−c)
-                        newTimer = this.timerLength - changeAmount;
-                    }
-                } else {
-                    newTimer = this.timerLength + changeAmount;
-                }
-
-                // Only update if the new timer is in valid range and change amount is non-zero
-                if (newTimer <= 0x7FF && newTimer >= 8 && changeAmount > 0) {
-                    this.timerLength = newTimer;
-                    this.updateFrequency();
-                }
+        // Different negation behavior for pulse 1 and 2
+        let newTimer;
+        if (this.sweepNegate) {
+            if (this.channelNumber === 1) {
+                // Pulse 1: ones' complement (−c − 1)
+                newTimer = this.timerLength - changeAmount - 1;
+            } else {
+                // Pulse 2: two's complement (−c)
+                newTimer = this.timerLength - changeAmount;
             }
+        } else {
+            newTimer = this.timerLength + changeAmount;
+        }
+
+        // Only update if the new timer is in valid range and change amount is non-zero
+        if (newTimer <= 0x7FF && newTimer >= 8 && changeAmount > 0) {
+            this.timerLength = newTimer;
+            this.updateFrequency();
         }
     }
 }
