@@ -38,13 +38,14 @@ export abstract class StandardChannel extends APUChannel {
         }
     }
 
+    public isLengthCounterZero(): boolean {
+        return this.lengthCounter <= 0;
+    }
 
-    async initialize() {
-        super.initialize();
 
-        this.gainNode = this.audioContext.createGain();
-        this.gainNode.connect(this.audioContext.destination);
-        this.gainNode.gain.setValueAtTime(0, this.audioContext.currentTime);
+    async initialize(destinationNode?: AudioNode) {
+        await super.initialize(destinationNode);
+        this.gainNode!.gain.setValueAtTime(0, this.audioContext.currentTime);
     }
 
 
@@ -82,6 +83,11 @@ export abstract class StandardChannel extends APUChannel {
         return (this.timerLength < 8 || !this.isEnabled || this.lengthCounter <= 0);
     }
 
+    protected onDisable(): void {
+        super.onDisable();
+        this.timerLength = 0;
+    }
+
     protected setGain(value: number): void {
         if (this.gainNode && this.lastGain !== value) {
             // Define a very short duration for the ramp to avoid audible delay
@@ -91,7 +97,6 @@ export abstract class StandardChannel extends APUChannel {
 
             // Use linearRampToValueAtTime for a smooth transition
             this.gainNode.gain.linearRampToValueAtTime(value, currentTime + rampTime);
-            console.log(`Setting gain to ${value} from ${this.constructor.name}`);
             this.lastGain = value;
         }
     }

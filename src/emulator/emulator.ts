@@ -350,7 +350,7 @@ export class NesVibes {
             this.p5.noStroke();
             this.p5.textAlign(this.p5.RIGHT, this.p5.TOP);
             this.p5.textSize(5);
-            this.p5.text(`FPS: ${this.cachedFps}`, (this.p5.width / this.scale) - 20, 20);
+            this.p5.text(`FPS: ${this.cachedFps}`, (this.p5.width / this.scale) - 5, 5);
 
             this.nes.frameReady = false;
             this.lastFrameTime = currentTime;
@@ -483,7 +483,6 @@ export class NesVibes {
         });
         const arrayBuffer = await response.arrayBuffer();
         const uint8Array = new Uint8Array(arrayBuffer);
-
         await this.nes.loadROM(uint8Array);
     }
 

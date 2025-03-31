@@ -10,8 +10,8 @@ export class ChannelPulse extends StandardChannel {
         super(nes);
     }
 
-    async initialize() {
-        super.initialize();
+    async initialize(destinationNode?: AudioNode) {
+        await super.initialize(destinationNode);
 
         this.oscillator = this.audioContext.createOscillator();
         this.oscillator.type = 'square';

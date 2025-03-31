@@ -11,7 +11,7 @@ export abstract class APUChannel {
 
     }
 
-    private _isEnabled: boolean = false;
+    protected _isEnabled: boolean = false;
 
     public get isEnabled(): boolean {
         return this._isEnabled;
@@ -19,11 +19,14 @@ export abstract class APUChannel {
 
     public set isEnabled(value: boolean) {
         if (!value) {
-            this.setGain(0);
+            this.onDisable();
         }
         this._isEnabled = value;
     }
 
+    protected onDisable() {
+        this.setGain(0);
+    }
 
     protected setGain(gain: number) {
         if (!this.isEnabled)
@@ -35,8 +38,10 @@ export abstract class APUChannel {
         }
     }
 
-    async initialize() {
+    async initialize(destinationNode?: AudioNode) {
         this.audioContext = this.nes.getApu()!.getAudioContext();
+        this.gainNode = this.audioContext.createGain();
+        this.gainNode.connect(destinationNode || this.audioContext.destination);
     }
 
 

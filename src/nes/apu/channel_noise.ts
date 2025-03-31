@@ -12,8 +12,8 @@ export class ChannelNoise extends StandardChannel {
     // Web Audio specific node for generating noise
     private noiseSource: AudioBufferSourceNode | null = null;
 
-    async initialize() {
-        await super.initialize(); // Initializes audioContext and gainNode
+    async initialize(destinationNode?: AudioNode) {
+        await super.initialize(destinationNode); // Initializes audioContext and gainNode
 
         if (this.audioContext && this.gainNode) {
             // Create a buffer for white noise (1 second long)
@@ -123,8 +123,6 @@ export class ChannelNoise extends StandardChannel {
         super.quarter_clock();
     }
 
-
-
     reset(): void {
         this.shiftRegister = 1; // Reset to 1 on power-up/reset
         this.modeFlag = false;
@@ -140,5 +138,4 @@ export class ChannelNoise extends StandardChannel {
         this.volume = 0;
         this.setGain(0);
     }
-
 }

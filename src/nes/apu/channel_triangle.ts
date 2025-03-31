@@ -12,8 +12,8 @@ export class ChannelTriangle extends StandardChannel {
     reset(): void {
     }
 
-    async initialize(): Promise<void> {
-        await super.initialize();
+    async initialize(destinationNode?: AudioNode): Promise<void> {
+        await super.initialize(destinationNode);
 
         this.oscillator = this.audioContext.createOscillator();
         this.oscillator.type = 'square';

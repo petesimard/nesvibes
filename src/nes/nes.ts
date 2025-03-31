@@ -22,6 +22,7 @@ export class Nes {
 
     public cycles: number = 0;
     public onPausedListeners: (() => void)[] = [];
+    public onUnPausedListeners: (() => void)[] = [];
     public breakOnRti: boolean = false;
     public frameReady: boolean = false;
     public outputBuffer: number[] = [];
@@ -138,6 +139,9 @@ export class Nes {
         this._isPaused = !this._isPaused;
         if (this._isPaused) {
             this.onPausedListeners.forEach(listener => listener());
+        }
+        else {
+            this.onUnPausedListeners.forEach(listener => listener());
         }
     }
 

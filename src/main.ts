@@ -1,14 +1,14 @@
 import { NesVibes } from './emulator/emulator';
-import { AudioManager } from './audio/audio-manager';
 
 const nesVibes = new NesVibes();
-const rom = "roms/Super Mario Bros. 3 (USA).zip";
+const rom = "r/Zelda - The Legend of Zelda.zip";
 //const rom = "roms/Super Mario Bros. 2 (Europe).zip";
 //const rom = "roms/square.nes";
 
 declare global {
     interface Window {
         startEmulator: () => void;
+        loadRom: (url: string) => void;
     }
 }
 
@@ -18,5 +18,6 @@ window.startEmulator = function () {
     })();
 }
 
-// Set window title to rom name
-document.title = rom;
+window.loadRom = async function (url: string) {
+    await nesVibes.setup(url);
+}

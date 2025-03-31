@@ -6,7 +6,7 @@ import { Cartridge } from "./cartridge";
 import { Mapper00 } from "../mappers/mapper_00";
 import { Mapper01 } from "../mappers/mapper_01";
 import { Mapper04 } from "../mappers/mapper_04";
-
+import { Mapper02 } from "../mappers/mapper_02";
 export class CartridgeLoader {
     constructor(private nes: Nes) {
         this.nes = nes;
@@ -27,6 +27,9 @@ export class CartridgeLoader {
                 break;
             case 1:
                 MapperClass = Mapper01;
+                break;
+            case 2:
+                MapperClass = Mapper02;
                 break;
             case 4:
                 MapperClass = Mapper04;

@@ -19,12 +19,11 @@ export class APU implements BusDevice {
     private channel_noise: ChannelNoise;
     private register_status: number = 0;
 
-    private sampleTotal: number = 0;
-    private sampleCount: number = 0;
-
-    //private channel_triangle: ChannelTriangle;
-    //private channel_noise: ChannelNoise;
-    //private channel_dmc: ChannelDMC;
+    // Mixing nodes
+    private pulseGainNode: GainNode | null = null;
+    private triangleGainNode: GainNode | null = null;
+    private noiseGainNode: GainNode | null = null;
+    private masterGainNode: GainNode | null = null;
 
     constructor(nes: Nes) {
         this.nes = nes;
@@ -41,6 +40,14 @@ export class APU implements BusDevice {
         window.addEventListener('beforeunload', () => {
             this.dispose();
         });
+
+        this.nes.onPausedListeners.push(() => {
+            this.masterGainNode!.gain.setValueAtTime(0, this.audioManager.audioContext!.currentTime);
+        });
+
+        this.nes.onUnPausedListeners.push(() => {
+            this.masterGainNode!.gain.setValueAtTime(1, this.audioManager.audioContext!.currentTime);
+        });
     }
 
     getAudioContext(): AudioContext {
@@ -49,10 +56,33 @@ export class APU implements BusDevice {
 
     async initialize() {
         await this.audioManager.initialize();
-        await this.channel_pulse1.initialize();
-        await this.channel_pulse2.initialize();
-        await this.channel_triangle.initialize();
-        await this.channel_noise.initialize();
+        const audioContext = this.audioManager.audioContext!;
+
+        // Create mixing nodes with NES coefficients
+        this.pulseGainNode = audioContext.createGain();
+        this.triangleGainNode = audioContext.createGain();
+        this.noiseGainNode = audioContext.createGain();
+        this.masterGainNode = audioContext.createGain();
+
+        // Set the mixing coefficients
+        this.pulseGainNode.gain.value = 0.00752 * 2.2;  // For pulse channels
+        this.triangleGainNode.gain.value = 0.00851 * 2.2;  // For triangle
+        this.noiseGainNode.gain.value = 0.00494 * 2.2;  // For noise
+
+        // Connect all mixing nodes to the master gain
+        this.pulseGainNode.connect(this.masterGainNode);
+        this.triangleGainNode.connect(this.masterGainNode);
+        this.noiseGainNode.connect(this.masterGainNode);
+
+        // Connect master gain to destination
+        this.masterGainNode.connect(audioContext.destination);
+
+        // Initialize channels
+        await this.channel_pulse1.initialize(this.pulseGainNode);
+        await this.channel_pulse2.initialize(this.pulseGainNode);
+        await this.channel_triangle.initialize(this.triangleGainNode);
+        await this.channel_noise.initialize(this.noiseGainNode);
+
         console.log("APU initialized");
     }
 
@@ -70,6 +100,9 @@ export class APU implements BusDevice {
         //     this.sampleCount++;
         // }
 
+        if (this.nes.isPaused()) {
+            this.masterGainNode!.gain.setValueAtTime(0, this.audioManager.audioContext!.currentTime);
+        }
 
         if (this.apu_clock % 2 == 0) {
             // Every other clock cycle
@@ -182,7 +215,20 @@ export class APU implements BusDevice {
     read(address: number): number {
         // APU status read
         if (address === 0x4000) {
-            return 0;
+            let status = 0;
+            if (!this.channel_pulse1.isLengthCounterZero()) {
+                status |= 0x01;
+            }
+            if (!this.channel_pulse2.isLengthCounterZero()) {
+                status |= 0x02;
+            }
+            if (!this.channel_triangle.isLengthCounterZero()) {
+                status |= 0x04;
+            }
+            if (!this.channel_noise.isLengthCounterZero()) {
+                status |= 0x08;
+            }
+            return status;
         }
         return 0;
     }
@@ -207,6 +253,7 @@ export class APU implements BusDevice {
         }
 
     }
+
     setStatusRegister(value: number) {
         this.register_status = value;
 

@@ -16,6 +16,7 @@ build/
 .DS_Store
 
 public/roms/
+public/r/
 
 # Debug logs
 npm-debug.log*

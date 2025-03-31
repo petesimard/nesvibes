@@ -6,7 +6,7 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <script defer src="https://cdn.jsdelivr.net/npm/alpinejs@3.x.x/dist/cdn.min.js"></script>
     <link rel="stylesheet" href="style.css">
-    <title>P5.js with TypeScript</title>
+    <title>NES Vibes</title>
     <style>
         /* Keep only styles that can't be easily replicated with Tailwind */
         #canvas {
@@ -78,7 +78,7 @@
             position: absolute;
             top: 43%;
             left: 33.6%;
-            width: 47%;
+            width: 40%;
             height: 72%;
             transform: translate(-50%, -50%);
             background-color: #00000000;
@@ -86,9 +86,9 @@
 
         .emulator-canvas-container {
             position: absolute;
-            top: 19%;
+            top: 23.5%;
             left: 33.6%;
-            width: 47%;
+            width: 44%;
             height: 22%;
             transform: translate(-50%, -50%);
             background-color: black;
@@ -103,7 +103,7 @@
             border-radius: 0.5rem;
             padding: 1rem;
             z-index: 2000;
-            width: 400px;
+            width: 600px;
             box-shadow: 0 25px 50px -12px rgb(0 0 0 / 0.25);
             border: 1px solid rgb(59 130 246 / 0.5);
         }
@@ -111,7 +111,7 @@
 </head>
 
 <body class="m-0 p-5 min-h-screen flex flex-col gap-5">
-    <div x-data="{ showPlayButton: true }">
+    <div x-data="{ showPlayButton: true, showRomSelect: false }">
         <img src="images/logo.png" class="logo" alt="NESVibes" />
 
         <div class="bg-blue-900/80 rounded-lg p-4 text-white font-mono hints">
@@ -151,161 +151,266 @@
             <img src="images/screen_overlay.png" class="emulator-container-img" alt="NESVibes" />
 
             <button x-show="showPlayButton" @click="startEmulator(); showPlayButton = false"
-                class="playButton flex items-center justify-center z-[10000] max-w-[200px]">
+                class="playButton flex items-center justify-center z-20 max-w-[200px]">
                 <img src="images/play.png" class="play-button" alt="Play" />
             </button>
 
-            <button class="nes-btn btn-primary" id="nesVibesScreen-btn" @click="console.log('clicked')">Load
-                ROM</button>
+            <button class="nes-btn btn-primary cursor-pointer" id="nesVibesScreen-btn"
+                @click="showRomSelect = true"></button>
         </div>
 
-        <div class="rom-loader-container hidden">
-            <div class="rom-loader-container-inner">
-                <div class="rom-loader-container-inner-header">
-                    <h1>Load ROM</h1>
-                </div>
-                <div class="rom-loader-container-inner-body">
-                    <input type="file" id="rom-loader-input" class="rom-loader-input" />
-                </div>
-            </div>
-        </div>
-
-        <div class="flex-grow bg-black/80 rounded-lg p-4 text-white font-mono h-[400px]">
-            <div class="flex flex-wrap gap-2.5 mb-4">
-                <div class="flex gap-2.5 w-full">
-                    <button
-                        class="px-4 py-2 rounded bg-neutral-700 text-white cursor-pointer hover:bg-neutral-600 flex-1"
-                        id="pause-resume">Pause</button>
-                    <button
-                        class="px-4 py-2 rounded bg-neutral-700 text-white cursor-pointer hover:bg-neutral-600 flex-1"
-                        id="load-rom">Load ROM</button>
-                </div>
-
-                <div class="flex gap-2.5 w-full">
-                    <button
-                        class="px-4 py-2 rounded bg-neutral-700 text-white cursor-pointer hover:bg-neutral-600 flex-1"
-                        id="step" disabled>Step</button>
-                </div>
-                <div class="flex gap-2.5 w-full">
-                    <button
-                        class="px-4 py-2 rounded bg-neutral-700 text-white cursor-pointer hover:bg-neutral-600 flex-1"
-                        id="reset">Reset</button>
-                    <button
-                        class="px-4 py-2 rounded bg-neutral-700 text-white cursor-pointer hover:bg-neutral-600 flex-1"
-                        id="reset">Power Cycle</button>
-                </div>
-                <div class="flex gap-2.5 w-full">
-                    <div class="flex-1 bg-neutral-800 rounded p-2">
-                        <div class="text-neutral-400 text-xs mb-1">CPU Registers</div>
-                        <div class="grid grid-cols-2 gap-1 text-sm">
-                            <div>A: <span id="reg-a" class="font-bold">$00</span></div>
-                            <div>X: <span id="reg-x" class="font-bold">$00</span></div>
-                            <div>Y: <span id="reg-y" class="font-bold">$00</span></div>
-                            <div>P: <span id="reg-p" class="font-bold">$00</span></div>
-                            <div>SP: <span id="reg-sp" class="font-bold">$00</span></div>
-                            <div>PC: <span id="reg-pc" class="font-bold">$0000</span></div>
-                            <div>Cycles: <span id="reg-cycles" class="font-bold">0</span></div>
-                        </div>
-                    </div>
-                    <div class="flex-1 bg-neutral-800 rounded p-2">
-                        <div class="text-neutral-400 text-xs mb-1">PPU Registers</div>
-                        <div class="grid grid-cols-2 gap-1 text-sm">
-                            <div>CTRL: <span id="reg-ppuctrl" class="font-bold">$00</span></div>
-                            <div>MASK: <span id="reg-ppumask" class="font-bold">$00</span></div>
-                            <div>STATUS: <span id="reg-ppustatus" class="font-bold">$00</span></div>
-                            <div>T: <span id="reg-ppu_t" class="font-bold">$00</span></div>
-                            <div>V: <span id="reg-ppu_v" class="font-bold">$00</span></div>
-                            <div>Scanline: <span id="reg-ppu_scanline" class="font-bold">$00</span></div>
-                            <div>Dot: <span id="reg-ppu_dot" class="font-bold">$00</span></div>
-                            <div>X Scrl: <span id="reg-ppu_xscroll" class="font-bold">$00</span></div>
-                            <div>Y Scrl: <span id="reg-ppu_yscroll" class="font-bold">$00</span></div>
-                        </div>
-                    </div>
-                </div>
-
-                <div class="flex-1 bg-neutral-800 rounded p-2">
-                    <div class="text-neutral-400 text-xs mb-1">Debug Flags</div>
-                    <div class="grid gap-2 text-sm">
-                        <label class="flex items-center gap-2">
-                            <input type="checkbox" id="break-nmi" class="accent-neutral-600">
-                            <span>Break on NMI</span>
-                        </label>
-                        <label class="flex items-center gap-2">
-                            <input type="checkbox" id="break-sti" class="accent-neutral-600">
-                            <span>Break on BRK/STI</span>
-                        </label>
-                        <div class="flex items-center gap-2">
-                            <input type="checkbox" id="break-instruction" class="accent-neutral-600">
-                            <input type="text" id="break-instruction-value" placeholder="Instruction (e.g. BRK)"
-                                class="bg-neutral-700 px-2 py-1 rounded text-sm w-62">
-                        </div>
-                        <div class="flex items-center gap-2">
-                            <input type="checkbox" id="break-cycle" class="accent-neutral-600">
-                            <input type="number" id="break-cycle-value" placeholder="Cycle number"
-                                class="bg-neutral-700 px-2 py-1 rounded text-sm w-62">
-                        </div>
-                    </div>
-                </div>
-            </div>
-            <div id="debug-output">
-            </div>
-
-            <div class="flex gap-5">
-                <div id="stack-container"
-                    class="w-[300px] flex-shrink-0 bg-black/80 text-white font-mono p-2.5 rounded-lg h-[200px]"></div>
-                <div id="log-container"
-                    class="flex-grow bg-black/80 text-white font-mono p-2.5 rounded-lg h-[200px] relative">
-                    <p id="log-line"></p>
-                </div>
-                <button id="copy-log"
-                    class="mt-2 px-3 py-1.5 bg-neutral-700 hover:bg-neutral-600 text-white rounded text-sm h-[30px]"
-                    onclick="navigator.clipboard.writeText(document.getElementById('log-line').textContent)">
-                    Copy
+        <div x-show="showRomSelect"
+            class="rom-loader-container h-[400px] fixed inset-0 bg-black/90 z-50 flex items-center justify-center p-8"
+            x-data="romData">
+            <div class="rom-loader-container-inner w-full max-w-4xl bg-blue-900/80 rounded-lg p-6 relative">
+                <button @click="showRomSelect = false" class="absolute top-4 right-4 text-white hover:text-gray-300">
+                    <svg xmlns="http://www.w3.org/2000/svg" class="h-6 w-6" fill="none" viewBox="0 0 24 24"
+                        stroke="currentColor">
+                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
+                            d="M6 18L18 6M6 6l12 12" />
+                    </svg>
                 </button>
-            </div>
-
-            <div class="flex gap-5 mt-4">
-                <div class="bg-black/80 rounded-lg p-4">
-                    <div class="text-neutral-400 text-xs mb-2 font-mono">Pattern Table 0</div>
-                    <canvas id="pattern-table-0" width="128" height="128" class="bg-black"></canvas>
-                </div>
-                <div class="bg-black/80 rounded-lg p-4">
-                    <div class="text-neutral-400 text-xs mb-2 font-mono">Pattern Table 1</div>
-                    <canvas id="pattern-table-1" width="128" height="128" class="bg-black"></canvas>
-                </div>
-                <div class="bg-black/80 rounded-lg p-4">
-                    <div class="text-neutral-400 text-xs mb-2 font-mono">Name Table 0</div>
-                    <canvas id="name-table-0" width="256" height="240" class="bg-black border border-white"></canvas>
-                </div>
-                <div class="bg-black/80 rounded-lg p-4">
-                    <div class="text-neutral-400 text-xs mb-2 font-mono">Name Table 1</div>
-                    <canvas id="name-table-1" width="256" height="240" class="bg-black border border-white"></canvas>
-                </div>
-                <div class="bg-black/80 rounded-lg p-4">
-                    <div class="text-neutral-400 text-xs mb-2 font-mono">Name Table 2</div>
-                    <canvas id="name-table-2" width="256" height="240" class="bg-black border border-white"></canvas>
-                </div>
-                <div class="bg-black/80 rounded-lg p-4">
-                    <div class="text-neutral-400 text-xs mb-2 font-mono">Name Table 3</div>
-                    <canvas id="name-table-3" width="256" height="240" class="bg-black border border-white"></canvas>
-                </div>
-
-            </div>
-            <div class="flex gap-5 mt-4">
-                <div class="bg-black/80 rounded-lg p-4">
-                    <div class="text-neutral-400 text-xs mb-2 font-mono">Palettes</div>
-                    <div id="palette-view" width="256" height="32"
-                        class="bg-black border border-white w-[135px] h-[280px]">
+                <div class="text-white font-mono text-xl mb-6">Select a ROM</div>
+                <div class="overflow-x-auto bg-black">
+                    <div class="flex gap-6 p-4">
+                        <template x-for="rom in roms" :key="rom.url">
+                            <div class="flex-shrink-0">
+                                <a href="#" @click="loadRom(rom.url); showPlayButton = false; showRomSelect = false;"
+                                    class="block transition-transform hover:scale-105">
+                                    <img :src="rom.cover" :alt="rom.name"
+                                        class="w-auto h-[150px] object-cover rounded-lg shadow-lg mb-2">
+                                    <div class="text-white font-mono text-sm text-center" x-text="rom.name"></div>
+                                </a>
+                            </div>
+                        </template>
                     </div>
                 </div>
-                <div class="bg-black/80 rounded-lg p-4">
-                    <div class="text-neutral-400 text-xs mb-2 font-mono">Sprites</div>
-                    <div id="sprite-view" class="bg-black border border-white w-[286px] h-[540px]"></div>
+                <input type="file" id="rom-loader-input" class="hidden">
+                <div class="mt-6 text-center">
+                    <label for="rom-loader-input"
+                        class="inline-block bg-blue-600 hover:bg-blue-700 text-white font-mono text-sm px-4 py-2 rounded cursor-pointer transition-colors">
+                        Load Custom ROM
+                    </label>
                 </div>
             </div>
         </div>
+    </div>
 
-        <script type="module" src="/src/main.ts"></script>
+    <div class="flex-grow bg-black/80 rounded-lg p-4 text-white font-mono h-[400px]">
+        <div class="flex flex-wrap gap-2.5 mb-4">
+            <div class="flex gap-2.5 w-full">
+                <button class="px-4 py-2 rounded bg-neutral-700 text-white cursor-pointer hover:bg-neutral-600 flex-1"
+                    id="pause-resume">Pause</button>
+                <button class="px-4 py-2 rounded bg-neutral-700 text-white cursor-pointer hover:bg-neutral-600 flex-1"
+                    id="load-rom">Load ROM</button>
+            </div>
+
+            <div class="flex gap-2.5 w-full">
+                <button class="px-4 py-2 rounded bg-neutral-700 text-white cursor-pointer hover:bg-neutral-600 flex-1"
+                    id="step" disabled>Step</button>
+            </div>
+            <div class="flex gap-2.5 w-full">
+                <button class="px-4 py-2 rounded bg-neutral-700 text-white cursor-pointer hover:bg-neutral-600 flex-1"
+                    id="reset">Reset</button>
+                <button class="px-4 py-2 rounded bg-neutral-700 text-white cursor-pointer hover:bg-neutral-600 flex-1"
+                    id="reset">Power Cycle</button>
+            </div>
+            <div class="flex gap-2.5 w-full">
+                <div class="flex-1 bg-neutral-800 rounded p-2">
+                    <div class="text-neutral-400 text-xs mb-1">CPU Registers</div>
+                    <div class="grid grid-cols-2 gap-1 text-sm">
+                        <div>A: <span id="reg-a" class="font-bold">$00</span></div>
+                        <div>X: <span id="reg-x" class="font-bold">$00</span></div>
+                        <div>Y: <span id="reg-y" class="font-bold">$00</span></div>
+                        <div>P: <span id="reg-p" class="font-bold">$00</span></div>
+                        <div>SP: <span id="reg-sp" class="font-bold">$00</span></div>
+                        <div>PC: <span id="reg-pc" class="font-bold">$0000</span></div>
+                        <div>Cycles: <span id="reg-cycles" class="font-bold">0</span></div>
+                    </div>
+                </div>
+                <div class="flex-1 bg-neutral-800 rounded p-2">
+                    <div class="text-neutral-400 text-xs mb-1">PPU Registers</div>
+                    <div class="grid grid-cols-2 gap-1 text-sm">
+                        <div>CTRL: <span id="reg-ppuctrl" class="font-bold">$00</span></div>
+                        <div>MASK: <span id="reg-ppumask" class="font-bold">$00</span></div>
+                        <div>STATUS: <span id="reg-ppustatus" class="font-bold">$00</span></div>
+                        <div>T: <span id="reg-ppu_t" class="font-bold">$00</span></div>
+                        <div>V: <span id="reg-ppu_v" class="font-bold">$00</span></div>
+                        <div>Scanline: <span id="reg-ppu_scanline" class="font-bold">$00</span></div>
+                        <div>Dot: <span id="reg-ppu_dot" class="font-bold">$00</span></div>
+                        <div>X Scrl: <span id="reg-ppu_xscroll" class="font-bold">$00</span></div>
+                        <div>Y Scrl: <span id="reg-ppu_yscroll" class="font-bold">$00</span></div>
+                    </div>
+                </div>
+            </div>
+
+            <div class="flex-1 bg-neutral-800 rounded p-2">
+                <div class="text-neutral-400 text-xs mb-1">Debug Flags</div>
+                <div class="grid gap-2 text-sm">
+                    <label class="flex items-center gap-2">
+                        <input type="checkbox" id="break-nmi" class="accent-neutral-600">
+                        <span>Break on NMI</span>
+                    </label>
+                    <label class="flex items-center gap-2">
+                        <input type="checkbox" id="break-sti" class="accent-neutral-600">
+                        <span>Break on BRK/STI</span>
+                    </label>
+                    <div class="flex items-center gap-2">
+                        <input type="checkbox" id="break-instruction" class="accent-neutral-600">
+                        <input type="text" id="break-instruction-value" placeholder="Instruction (e.g. BRK)"
+                            class="bg-neutral-700 px-2 py-1 rounded text-sm w-62">
+                    </div>
+                    <div class="flex items-center gap-2">
+                        <input type="checkbox" id="break-cycle" class="accent-neutral-600">
+                        <input type="number" id="break-cycle-value" placeholder="Cycle number"
+                            class="bg-neutral-700 px-2 py-1 rounded text-sm w-62">
+                    </div>
+                </div>
+            </div>
+        </div>
+        <div id="debug-output">
+        </div>
+
+        <div class="flex gap-5">
+            <div id="stack-container"
+                class="w-[300px] flex-shrink-0 bg-black/80 text-white font-mono p-2.5 rounded-lg h-[200px]"></div>
+            <div id="log-container"
+                class="flex-grow bg-black/80 text-white font-mono p-2.5 rounded-lg h-[200px] relative">
+                <p id="log-line"></p>
+            </div>
+            <button id="copy-log"
+                class="mt-2 px-3 py-1.5 bg-neutral-700 hover:bg-neutral-600 text-white rounded text-sm h-[30px]"
+                onclick="navigator.clipboard.writeText(document.getElementById('log-line').textContent)">
+                Copy
+            </button>
+        </div>
+
+        <div class="flex gap-5 mt-4">
+            <div class="bg-black/80 rounded-lg p-4">
+                <div class="text-neutral-400 text-xs mb-2 font-mono">Pattern Table 0</div>
+                <canvas id="pattern-table-0" width="128" height="128" class="bg-black"></canvas>
+            </div>
+            <div class="bg-black/80 rounded-lg p-4">
+                <div class="text-neutral-400 text-xs mb-2 font-mono">Pattern Table 1</div>
+                <canvas id="pattern-table-1" width="128" height="128" class="bg-black"></canvas>
+            </div>
+            <div class="bg-black/80 rounded-lg p-4">
+                <div class="text-neutral-400 text-xs mb-2 font-mono">Name Table 0</div>
+                <canvas id="name-table-0" width="256" height="240" class="bg-black border border-white"></canvas>
+            </div>
+            <div class="bg-black/80 rounded-lg p-4">
+                <div class="text-neutral-400 text-xs mb-2 font-mono">Name Table 1</div>
+                <canvas id="name-table-1" width="256" height="240" class="bg-black border border-white"></canvas>
+            </div>
+            <div class="bg-black/80 rounded-lg p-4">
+                <div class="text-neutral-400 text-xs mb-2 font-mono">Name Table 2</div>
+                <canvas id="name-table-2" width="256" height="240" class="bg-black border border-white"></canvas>
+            </div>
+            <div class="bg-black/80 rounded-lg p-4">
+                <div class="text-neutral-400 text-xs mb-2 font-mono">Name Table 3</div>
+                <canvas id="name-table-3" width="256" height="240" class="bg-black border border-white"></canvas>
+            </div>
+
+        </div>
+        <div class="flex gap-5 mt-4">
+            <div class="bg-black/80 rounded-lg p-4">
+                <div class="text-neutral-400 text-xs mb-2 font-mono">Palettes</div>
+                <div id="palette-view" width="256" height="32" class="bg-black border border-white w-[135px] h-[280px]">
+                </div>
+            </div>
+            <div class="bg-black/80 rounded-lg p-4">
+                <div class="text-neutral-400 text-xs mb-2 font-mono">Sprites</div>
+                <div id="sprite-view" class="bg-black border border-white w-[286px] h-[540px]"></div>
+            </div>
+        </div>
+    </div>
+
+    <script type="module" src="/src/main.ts"></script>
+    <script>
+        document.addEventListener('alpine:init', () => {
+            Alpine.data('romData', () => ({
+                roms: [
+                    {
+                        name: 'Super Mario Bros',
+                        url: '/r/smb1.zip',
+                        cover: '/images/covers/smb1.jpg'
+                    },
+                    {
+                        name: 'Super Mario Bros 3',
+                        url: '/r/Super Mario Bros. 3 (USA).zip',
+                        cover: '/images/covers/smb3.jpg'
+                    },
+                    {
+                        name: 'Chip n\' Dale',
+                        url: '/r/Chip \'n Dale - Rescue Rangers (USA).zip',
+                        cover: '/images/covers/chip.jpg'
+                    },
+                    {
+                        name: 'Donkey Kong Jr.',
+                        url: '/r/Donkey Kong Jr..nes',
+                        cover: '/images/covers/donkey.jpg'
+                    },
+                    {
+                        name: 'DuckTales',
+                        url: '/r/DuckTales (USA).nes',
+                        cover: '/images/covers/ducktails.jpg'
+                    },
+                    {
+                        name: 'Mega Man 2',
+                        url: '/r/Mega Man 2 (USA).nes',
+                        cover: '/images/covers/megaman2.jpg'
+                    },
+                    {
+                        name: 'Ninja Gaiden',
+                        url: '/r/Ninja Gaiden (USA).zip',
+                        cover: '/images/covers/ninjagaiden.jpg'
+                    },
+                    {
+                        name: 'Tetris',
+                        url: '/r/Tetris (USA).zip',
+                        cover: '/images/covers/tetris.jpg'
+                    },
+                    {
+                        name: 'Legend of Zelda',
+                        url: '/r/Zelda - The Legend of Zelda.zip',
+                        cover: '/images/covers/zelda.jpg'
+                    }, {
+                        name: 'Rygar',
+                        url: '/r/Rygar.NES',
+                        cover: '/images/covers/rygar.jpg'
+                    }, {
+                        name: 'TMNT',
+                        url: '/r/TMNT (USA).nes',
+                        cover: '/images/covers/tmnt.jpg'
+                    }, {
+                        name: '1942',
+                        url: '/r/1942.nes',
+                        cover: '/images/covers/1942.jpg'
+                    },
+                    {
+                        name: 'Burger Time',
+                        url: '/r/Burger_Time.nes',
+                        cover: '/images/covers/burger.jpg'
+                    },
+                    {
+                        name: 'Excitebike',
+                        url: '/r/Excitebike.nes',
+                        cover: '/images/covers/excitebike.jpg'
+                    },
+                    {
+                        name: 'Kung Fu',
+                        url: '/r/Kung_Fu.nes',
+                        cover: '/images/covers/kungfu.jpg'
+                    },
+                    {
+                        name: 'Tennis',
+                        url: '/r/Tennis.nes',
+                        cover: '/images/covers/tennis.jpg'
+                    },
+                ]
+            }))
+        })
+    </script>
     </div>
 </body>
 
