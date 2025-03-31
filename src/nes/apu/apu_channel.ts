@@ -4,6 +4,7 @@ export abstract class APUChannel {
     protected gainNode: GainNode | null = null;
     protected lastGain: number = -1;
     protected audioContext!: AudioContext;
+    protected lastFrequency: number = 0;
 
 
     constructor(protected nes: Nes) {
@@ -42,7 +43,6 @@ export abstract class APUChannel {
     abstract clock(): void;
     abstract quarter_clock(): void;
     abstract half_clock(): void;
-    abstract getOutput(): number;
     abstract reset(): void;
     abstract onWrite(address: number, value: number): void;
 }
