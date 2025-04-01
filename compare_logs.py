@@ -18,36 +18,34 @@ def parse_log_line(line: str) -> Optional[LogLine]:
     if not line.strip():
         return None
         
-    # Regular expression to match the log format
-    pattern = r'''
-        \s*(\w+)\s+                    # Address
-        ((?:[0-9A-F]{2}\s*)+)\s+      # Instruction bytes
-        ([^A:]+)                       # Command
-        A:([0-9A-F]{2})\s+            # A register
-        X:([0-9A-F]{2})\s+            # X register
-        Y:([0-9A-F]{2})\s+            # Y register
-        P:([0-9A-F]{2})\s+            # P register
-        SP:([0-9A-F]{2})\s+           # SP register
-        PPU:\s*([^C]+)                # PPU state
-        CYC:(\d+)                      # Cycle count
-    '''
+    # Example line:
+#C9A6  18        CLC                             A:9F X:00 Y:00 P:A5 SP:FB PPU:  5,293 CYC:666
     
-    match = re.match(pattern, line, re.VERBOSE)
-    if not match:
-        return None
-        
+    # Split line into parts based on fixed positions
+    address = line[0:4].strip()
+    instruction = line[6:8].strip()
+    command = line[10:20].strip()
+    reg_a = line[50:52]
+    reg_x = line[55:57]
+    reg_y = line[60:62]
+    reg_p = line[65:67]
+    reg_sp = line[70:72]
+    ppu = line[80:86].strip()
+    cyc = line[90:95]
+    
     return LogLine(
-        address=match.group(1),
-        instruction=match.group(2).strip(),
-        command=match.group(3).strip(),
-        reg_a=match.group(4),
-        reg_x=match.group(5),
-        reg_y=match.group(6),
-        reg_p=match.group(7),
-        reg_sp=match.group(8),
-        ppu=match.group(9).strip(),
-        cyc=int(match.group(10))
+        address=address,
+        instruction=instruction,
+        command=command,
+        reg_a=reg_a,
+        reg_x=reg_x,
+        reg_y=reg_y,
+        reg_p=reg_p,
+        reg_sp=reg_sp,
+        ppu=ppu,
+        cyc=cyc
     )
+
 
 def compare_logs(reference_log: str, test_log: str) -> None:
     """Compare two NES test logs and find where they diverge."""
@@ -55,15 +53,9 @@ def compare_logs(reference_log: str, test_log: str) -> None:
     with open(reference_log, 'r') as f:
         reference_lines = [line.strip() for line in f if line.strip()]
     
-    print("Paste the test log lines (press Ctrl+D or Ctrl+Z when done):")
-    test_lines = []
-    try:
-        while True:
-            line = input()
-            if line.strip():
-                test_lines.append(line.strip())
-    except EOFError:
-        pass
+    with open(test_log, 'r') as f:
+        test_lines = [line.strip() for line in f if line.strip()]
+    
 
     # Skip first line of both logs
     reference_lines = reference_lines[1:]
@@ -116,4 +108,4 @@ def compare_logs(reference_log: str, test_log: str) -> None:
         print(f"Test log: {len(test_lines)} lines")
 
 if __name__ == "__main__":
-    compare_logs("public/logs/nestest.log", "test_input") 
+    compare_logs("public/logs/nestest.log", "public/logs/test.log") 

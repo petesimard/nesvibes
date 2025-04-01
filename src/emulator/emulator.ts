@@ -129,7 +129,7 @@ export class NesVibes {
                 const canvas = document.getElementById('canvas')!;
                 p5.createCanvas(256 * this.scale, (240 - (this.overscan ? 16 : 0)) * this.scale).parent(canvas);
                 p5.background(0);
-                p5.frameRate(1);
+                p5.frameRate(90);
             };
         };
 
@@ -256,18 +256,23 @@ export class NesVibes {
         let instructionTargetAddress = '';
 
         if (instructionResult.target_address != undefined) {
-            if (instructionResult.instructionMetadata?.mode == AddressingMode.IndirectX || instructionResult.instructionMetadata?.mode == AddressingMode.IndirectY) {
+            if (instructionResult.instructionMetadata?.mode == AddressingMode.IndirectX) {
                 instructionTargetAddress += '($' + numberToHex(instructionResult.indirectOffsetBase!) + ',';
-                if (instructionResult.instructionMetadata?.mode == AddressingMode.IndirectX)
-                    instructionTargetAddress += 'X)';
-                else
-                    instructionTargetAddress += 'Y)';
+                instructionTargetAddress += 'X)';
+
 
                 instructionTargetAddress += ' @ ' + numberToHex(instructionResult.indirectOffset!);
                 instructionTargetAddress += ' = ' + numberToHex(instructionResult.target_address!).padStart(4, '0');
             }
-            else {
+            else if (instructionResult.instructionMetadata?.mode == AddressingMode.IndirectY) {
+                instructionTargetAddress += '($' + numberToHex(instructionResult.indirectOffsetBase!) + '),';
+                instructionTargetAddress += 'Y';
 
+
+                instructionTargetAddress += ' = ' + numberToHex(instructionResult.target_address!).padStart(4, '0');
+                instructionTargetAddress += ' @ ' + numberToHex(instructionResult.target_address!).padStart(4, '0');
+            }
+            else {
                 if (instructionResult.instructionMetadata?.mode == AddressingMode.Immediate)
                     instructionTargetAddress += '#' + instructionTargetAddress;
 
@@ -281,12 +286,12 @@ export class NesVibes {
 
         let decodedInstruction = instructionResult.instructionMetadata?.name + ' ' + instructionTargetAddress;
 
-        if (instructionResult.target_address_memory != undefined) {
-            decodedInstruction += ' = ' + numberToHex(instructionResult.target_address_memory);
+        if (instructionResult.target_address_value != undefined) {
+            decodedInstruction += ' = ' + numberToHex(instructionResult.target_address_value);
         }
         decodedInstruction = decodedInstruction.padEnd(31, ' ');
 
-        const result = `${numberToHex(instructionResult.register_PC).toString().padEnd(5, ' ')} ${instructionBytesString} ${decodedInstruction} A:${numberToHex(instructionResult.register_A)} X:${numberToHex(instructionResult.register_X)} Y:${numberToHex(instructionResult.register_Y)} P:${numberToHex(instructionResult.status_flags)} SP:${numberToHex(instructionResult.register_SP)} PPU:${instructionResult.ppu_scanline.toString().padStart(3, ' ')},${instructionResult.ppu_dot.toString().padStart(3, ' ')} CYC:${instructionResult.cycles}`;
+        const result = `${numberToHex(instructionResult.register_PC).toString().padStart(4, '0').padEnd(5, ' ')} ${instructionBytesString} ${decodedInstruction} A:${numberToHex(instructionResult.register_A)} X:${numberToHex(instructionResult.register_X)} Y:${numberToHex(instructionResult.register_Y)} P:${numberToHex(instructionResult.status_flags)} SP:${numberToHex(instructionResult.register_SP)} PPU:${instructionResult.ppu_scanline.toString().padStart(3, ' ')},${instructionResult.ppu_dot.toString().padStart(3, ' ')} CYC:${instructionResult.cycles}`;
 
         return result;
 

@@ -217,9 +217,10 @@ export class Nes {
     }
 
     write(address: number, value: number): void {
-        if (address == 0x11) {
-            console.log(`Write to 0x11: ${numberToHex(value)} cpu: ${numberToHex(this.cpu.instructionResult.register_PC)}`);
-        }
+        // if (address == 0x0) {
+        //     console.log(`Write to 0x00: ${numberToHex(value)} cpu: ${numberToHex(this.cpu.instructionResult.register_PC)}`);
+        // }
+
         if (address >= 0x0000 && address <= 0x07FF) {
             this.ram.write(address, value);
         }

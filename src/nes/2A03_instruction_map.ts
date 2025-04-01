@@ -8,6 +8,7 @@ export interface InstructionMetadata {
     instruction_length: number;
     instruction?: Instruction;
     noInitialCycleDelay?: boolean;
+    checkForOopsCycle?: boolean;
 }
 
 
@@ -51,22 +52,22 @@ instructionMap[0xA9] = { name: 'LDA', mode: AddressingMode.Immediate, cycles: 2,
 instructionMap[0xA5] = { name: 'LDA', mode: AddressingMode.ZeroPage, cycles: 3, instruction_length: 2 };
 instructionMap[0xB5] = { name: 'LDA', mode: AddressingMode.ZeroPageX, cycles: 4, instruction_length: 2 };
 instructionMap[0xAD] = { name: 'LDA', mode: AddressingMode.Absolute, cycles: 4, instruction_length: 3 };
-instructionMap[0xBD] = { name: 'LDA', mode: AddressingMode.AbsoluteX, cycles: 4, instruction_length: 3 };
-instructionMap[0xB9] = { name: 'LDA', mode: AddressingMode.AbsoluteY, cycles: 4, instruction_length: 3 };
+instructionMap[0xBD] = { name: 'LDA', mode: AddressingMode.AbsoluteX, cycles: 4, instruction_length: 3, checkForOopsCycle: true };
+instructionMap[0xB9] = { name: 'LDA', mode: AddressingMode.AbsoluteY, cycles: 4, instruction_length: 3, checkForOopsCycle: true };
 instructionMap[0xA1] = { name: 'LDA', mode: AddressingMode.IndirectX, cycles: 6, instruction_length: 2 };
-instructionMap[0xB1] = { name: 'LDA', mode: AddressingMode.IndirectY, cycles: 5, instruction_length: 2 };
+instructionMap[0xB1] = { name: 'LDA', mode: AddressingMode.IndirectY, cycles: 5, instruction_length: 2, checkForOopsCycle: true };
 
 instructionMap[0xA2] = { name: 'LDX', mode: AddressingMode.Immediate, cycles: 2, instruction_length: 2 };
 instructionMap[0xA6] = { name: 'LDX', mode: AddressingMode.ZeroPage, cycles: 3, instruction_length: 2 };
 instructionMap[0xB6] = { name: 'LDX', mode: AddressingMode.ZeroPageY, cycles: 4, instruction_length: 2 };
 instructionMap[0xAE] = { name: 'LDX', mode: AddressingMode.Absolute, cycles: 4, instruction_length: 3 };
-instructionMap[0xBE] = { name: 'LDX', mode: AddressingMode.AbsoluteY, cycles: 4, instruction_length: 3 };
+instructionMap[0xBE] = { name: 'LDX', mode: AddressingMode.AbsoluteY, cycles: 4, instruction_length: 3, checkForOopsCycle: true };
 
 instructionMap[0xA0] = { name: 'LDY', mode: AddressingMode.Immediate, cycles: 2, instruction_length: 2 };
 instructionMap[0xA4] = { name: 'LDY', mode: AddressingMode.ZeroPage, cycles: 3, instruction_length: 2 };
 instructionMap[0xB4] = { name: 'LDY', mode: AddressingMode.ZeroPageX, cycles: 4, instruction_length: 2 };
 instructionMap[0xAC] = { name: 'LDY', mode: AddressingMode.Absolute, cycles: 4, instruction_length: 3 };
-instructionMap[0xBC] = { name: 'LDY', mode: AddressingMode.AbsoluteX, cycles: 4, instruction_length: 3 };
+instructionMap[0xBC] = { name: 'LDY', mode: AddressingMode.AbsoluteX, cycles: 4, instruction_length: 3, checkForOopsCycle: true };
 
 instructionMap[0x85] = { name: 'STA', mode: AddressingMode.ZeroPage, cycles: 3, instruction_length: 2 };
 instructionMap[0x95] = { name: 'STA', mode: AddressingMode.ZeroPageX, cycles: 4, instruction_length: 2 };
@@ -103,28 +104,28 @@ instructionMap[0x29] = { name: 'AND', mode: AddressingMode.Immediate, cycles: 2,
 instructionMap[0x25] = { name: 'AND', mode: AddressingMode.ZeroPage, cycles: 3, instruction_length: 2 };
 instructionMap[0x35] = { name: 'AND', mode: AddressingMode.ZeroPageX, cycles: 4, instruction_length: 2 };
 instructionMap[0x2D] = { name: 'AND', mode: AddressingMode.Absolute, cycles: 4, instruction_length: 3 };
-instructionMap[0x3D] = { name: 'AND', mode: AddressingMode.AbsoluteX, cycles: 4, instruction_length: 3 };
-instructionMap[0x39] = { name: 'AND', mode: AddressingMode.AbsoluteY, cycles: 4, instruction_length: 3 };
+instructionMap[0x3D] = { name: 'AND', mode: AddressingMode.AbsoluteX, cycles: 4, instruction_length: 3, checkForOopsCycle: true };
+instructionMap[0x39] = { name: 'AND', mode: AddressingMode.AbsoluteY, cycles: 4, instruction_length: 3, checkForOopsCycle: true };
 instructionMap[0x21] = { name: 'AND', mode: AddressingMode.IndirectX, cycles: 6, instruction_length: 2 };
-instructionMap[0x31] = { name: 'AND', mode: AddressingMode.IndirectY, cycles: 5, instruction_length: 2 };
+instructionMap[0x31] = { name: 'AND', mode: AddressingMode.IndirectY, cycles: 5, instruction_length: 2, checkForOopsCycle: true };
 
 instructionMap[0x49] = { name: 'EOR', mode: AddressingMode.Immediate, cycles: 2, instruction_length: 2 };
 instructionMap[0x45] = { name: 'EOR', mode: AddressingMode.ZeroPage, cycles: 3, instruction_length: 2 };
 instructionMap[0x55] = { name: 'EOR', mode: AddressingMode.ZeroPageX, cycles: 4, instruction_length: 2 };
 instructionMap[0x4D] = { name: 'EOR', mode: AddressingMode.Absolute, cycles: 4, instruction_length: 3 };
-instructionMap[0x5D] = { name: 'EOR', mode: AddressingMode.AbsoluteX, cycles: 4, instruction_length: 3 };
-instructionMap[0x59] = { name: 'EOR', mode: AddressingMode.AbsoluteY, cycles: 4, instruction_length: 3 };
+instructionMap[0x5D] = { name: 'EOR', mode: AddressingMode.AbsoluteX, cycles: 4, instruction_length: 3, checkForOopsCycle: true };
+instructionMap[0x59] = { name: 'EOR', mode: AddressingMode.AbsoluteY, cycles: 4, instruction_length: 3, checkForOopsCycle: true };
 instructionMap[0x41] = { name: 'EOR', mode: AddressingMode.IndirectX, cycles: 6, instruction_length: 2 };
-instructionMap[0x51] = { name: 'EOR', mode: AddressingMode.IndirectY, cycles: 5, instruction_length: 2 };
+instructionMap[0x51] = { name: 'EOR', mode: AddressingMode.IndirectY, cycles: 5, instruction_length: 2, checkForOopsCycle: true };
 
 instructionMap[0x09] = { name: 'ORA', mode: AddressingMode.Immediate, cycles: 2, instruction_length: 2 };
 instructionMap[0x05] = { name: 'ORA', mode: AddressingMode.ZeroPage, cycles: 3, instruction_length: 2 };
 instructionMap[0x15] = { name: 'ORA', mode: AddressingMode.ZeroPageX, cycles: 4, instruction_length: 2 };
 instructionMap[0x0D] = { name: 'ORA', mode: AddressingMode.Absolute, cycles: 4, instruction_length: 3 };
-instructionMap[0x1D] = { name: 'ORA', mode: AddressingMode.AbsoluteX, cycles: 4, instruction_length: 3 };
-instructionMap[0x19] = { name: 'ORA', mode: AddressingMode.AbsoluteY, cycles: 4, instruction_length: 3 };
+instructionMap[0x1D] = { name: 'ORA', mode: AddressingMode.AbsoluteX, cycles: 4, instruction_length: 3, checkForOopsCycle: true };
+instructionMap[0x19] = { name: 'ORA', mode: AddressingMode.AbsoluteY, cycles: 4, instruction_length: 3, checkForOopsCycle: true };
 instructionMap[0x01] = { name: 'ORA', mode: AddressingMode.IndirectX, cycles: 6, instruction_length: 2 };
-instructionMap[0x11] = { name: 'ORA', mode: AddressingMode.IndirectY, cycles: 5, instruction_length: 2 };
+instructionMap[0x11] = { name: 'ORA', mode: AddressingMode.IndirectY, cycles: 5, instruction_length: 2, checkForOopsCycle: true };
 
 instructionMap[0x24] = { name: 'BIT', mode: AddressingMode.ZeroPage, cycles: 3, instruction_length: 2 };
 instructionMap[0x2C] = { name: 'BIT', mode: AddressingMode.Absolute, cycles: 4, instruction_length: 3 };
@@ -134,28 +135,28 @@ instructionMap[0x69] = { name: 'ADC', mode: AddressingMode.Immediate, cycles: 2,
 instructionMap[0x65] = { name: 'ADC', mode: AddressingMode.ZeroPage, cycles: 3, instruction_length: 2 };
 instructionMap[0x75] = { name: 'ADC', mode: AddressingMode.ZeroPageX, cycles: 4, instruction_length: 2 };
 instructionMap[0x6D] = { name: 'ADC', mode: AddressingMode.Absolute, cycles: 4, instruction_length: 3 };
-instructionMap[0x7D] = { name: 'ADC', mode: AddressingMode.AbsoluteX, cycles: 4, instruction_length: 3 };
-instructionMap[0x79] = { name: 'ADC', mode: AddressingMode.AbsoluteY, cycles: 4, instruction_length: 3 };
+instructionMap[0x7D] = { name: 'ADC', mode: AddressingMode.AbsoluteX, cycles: 4, instruction_length: 3, checkForOopsCycle: true };
+instructionMap[0x79] = { name: 'ADC', mode: AddressingMode.AbsoluteY, cycles: 4, instruction_length: 3, checkForOopsCycle: true };
 instructionMap[0x61] = { name: 'ADC', mode: AddressingMode.IndirectX, cycles: 6, instruction_length: 2 };
-instructionMap[0x71] = { name: 'ADC', mode: AddressingMode.IndirectY, cycles: 5, instruction_length: 2 };
+instructionMap[0x71] = { name: 'ADC', mode: AddressingMode.IndirectY, cycles: 5, instruction_length: 2, checkForOopsCycle: true };
 
 instructionMap[0xE9] = { name: 'SBC', mode: AddressingMode.Immediate, cycles: 2, instruction_length: 2 };
 instructionMap[0xE5] = { name: 'SBC', mode: AddressingMode.ZeroPage, cycles: 3, instruction_length: 2 };
 instructionMap[0xF5] = { name: 'SBC', mode: AddressingMode.ZeroPageX, cycles: 4, instruction_length: 2 };
 instructionMap[0xED] = { name: 'SBC', mode: AddressingMode.Absolute, cycles: 4, instruction_length: 3 };
-instructionMap[0xFD] = { name: 'SBC', mode: AddressingMode.AbsoluteX, cycles: 4, instruction_length: 3 };
-instructionMap[0xF9] = { name: 'SBC', mode: AddressingMode.AbsoluteY, cycles: 4, instruction_length: 3 };
+instructionMap[0xFD] = { name: 'SBC', mode: AddressingMode.AbsoluteX, cycles: 4, instruction_length: 3, checkForOopsCycle: true };
+instructionMap[0xF9] = { name: 'SBC', mode: AddressingMode.AbsoluteY, cycles: 4, instruction_length: 3, checkForOopsCycle: true };
 instructionMap[0xE1] = { name: 'SBC', mode: AddressingMode.IndirectX, cycles: 6, instruction_length: 2 };
-instructionMap[0xF1] = { name: 'SBC', mode: AddressingMode.IndirectY, cycles: 5, instruction_length: 2 };
+instructionMap[0xF1] = { name: 'SBC', mode: AddressingMode.IndirectY, cycles: 5, instruction_length: 2, checkForOopsCycle: true };
 
 instructionMap[0xC9] = { name: 'CMP', mode: AddressingMode.Immediate, cycles: 2, instruction_length: 2 };
 instructionMap[0xC5] = { name: 'CMP', mode: AddressingMode.ZeroPage, cycles: 3, instruction_length: 2 };
 instructionMap[0xD5] = { name: 'CMP', mode: AddressingMode.ZeroPageX, cycles: 4, instruction_length: 2 };
 instructionMap[0xCD] = { name: 'CMP', mode: AddressingMode.Absolute, cycles: 4, instruction_length: 3 };
-instructionMap[0xDD] = { name: 'CMP', mode: AddressingMode.AbsoluteX, cycles: 4, instruction_length: 3 };
-instructionMap[0xD9] = { name: 'CMP', mode: AddressingMode.AbsoluteY, cycles: 4, instruction_length: 3 };
+instructionMap[0xDD] = { name: 'CMP', mode: AddressingMode.AbsoluteX, cycles: 4, instruction_length: 3, checkForOopsCycle: true };
+instructionMap[0xD9] = { name: 'CMP', mode: AddressingMode.AbsoluteY, cycles: 4, instruction_length: 3, checkForOopsCycle: true };
 instructionMap[0xC1] = { name: 'CMP', mode: AddressingMode.IndirectX, cycles: 6, instruction_length: 2 };
-instructionMap[0xD1] = { name: 'CMP', mode: AddressingMode.IndirectY, cycles: 5, instruction_length: 2 };
+instructionMap[0xD1] = { name: 'CMP', mode: AddressingMode.IndirectY, cycles: 5, instruction_length: 2, checkForOopsCycle: true };
 
 instructionMap[0xE0] = { name: 'CPX', mode: AddressingMode.Immediate, cycles: 2, instruction_length: 2 };
 instructionMap[0xE4] = { name: 'CPX', mode: AddressingMode.ZeroPage, cycles: 3, instruction_length: 2 };
@@ -263,19 +264,19 @@ instructionMap[0x0C] = { name: '!NOP', mode: AddressingMode.Immediate, cycles: 4
 
 instructionMap[0x80] = { name: '+NOP', mode: AddressingMode.Immediate, cycles: 4, instruction_length: 3 }; // Unofficial
 
-instructionMap[0x1C] = { name: '@NOP', mode: AddressingMode.AbsoluteX, cycles: 5, instruction_length: 4 }; // Unofficial
-instructionMap[0x3C] = { name: '@NOP', mode: AddressingMode.AbsoluteX, cycles: 5, instruction_length: 4 }; // Unofficial
-instructionMap[0x5C] = { name: '@NOP', mode: AddressingMode.AbsoluteX, cycles: 5, instruction_length: 4 }; // Unofficial
-instructionMap[0x7C] = { name: '@NOP', mode: AddressingMode.AbsoluteX, cycles: 5, instruction_length: 4 }; // Unofficial
-instructionMap[0xDC] = { name: '@NOP', mode: AddressingMode.AbsoluteX, cycles: 5, instruction_length: 4 }; // Unofficial
-instructionMap[0xFC] = { name: '@NOP', mode: AddressingMode.AbsoluteX, cycles: 5, instruction_length: 4 }; // Unofficial
+instructionMap[0x1C] = { name: '@NOP', mode: AddressingMode.AbsoluteX, cycles: 5, instruction_length: 3, checkForOopsCycle: true }; // Unofficial
+instructionMap[0x3C] = { name: '@NOP', mode: AddressingMode.AbsoluteX, cycles: 5, instruction_length: 3, checkForOopsCycle: true }; // Unofficial
+instructionMap[0x5C] = { name: '@NOP', mode: AddressingMode.AbsoluteX, cycles: 5, instruction_length: 3, checkForOopsCycle: true }; // Unofficial
+instructionMap[0x7C] = { name: '@NOP', mode: AddressingMode.AbsoluteX, cycles: 5, instruction_length: 3, checkForOopsCycle: true }; // Unofficial
+instructionMap[0xDC] = { name: '@NOP', mode: AddressingMode.AbsoluteX, cycles: 5, instruction_length: 3, checkForOopsCycle: true }; // Unofficial
+instructionMap[0xFC] = { name: '@NOP', mode: AddressingMode.AbsoluteX, cycles: 5, instruction_length: 3, checkForOopsCycle: true }; // Unofficial
 
 instructionMap[0xA7] = { name: '*LAX', mode: AddressingMode.ZeroPage, cycles: 3, instruction_length: 2 }; // Unofficial
 instructionMap[0xB7] = { name: '*LAX', mode: AddressingMode.ZeroPageY, cycles: 4, instruction_length: 2 }; // Unofficial
 instructionMap[0xAF] = { name: '*LAX', mode: AddressingMode.Absolute, cycles: 4, instruction_length: 3 }; // Unofficial
-instructionMap[0xBF] = { name: '*LAX', mode: AddressingMode.AbsoluteY, cycles: 4, instruction_length: 3 }; // Unofficial
+instructionMap[0xBF] = { name: '*LAX', mode: AddressingMode.AbsoluteY, cycles: 4, instruction_length: 3, checkForOopsCycle: true }; // Unofficial
 instructionMap[0xA3] = { name: '*LAX', mode: AddressingMode.IndirectX, cycles: 6, instruction_length: 2 }; // Unofficial
-instructionMap[0xB3] = { name: '*LAX', mode: AddressingMode.IndirectY, cycles: 5, instruction_length: 2 }; // Unofficial
+instructionMap[0xB3] = { name: '*LAX', mode: AddressingMode.IndirectY, cycles: 5, instruction_length: 2, checkForOopsCycle: true }; // Unofficial
 
 instructionMap[0x87] = { name: '*SAX', mode: AddressingMode.ZeroPage, cycles: 3, instruction_length: 2 }; // Unofficial
 instructionMap[0x97] = { name: '*SAX', mode: AddressingMode.ZeroPageY, cycles: 4, instruction_length: 2 }; // Unofficial

@@ -21,7 +21,7 @@ export class InstructionResult {
     register_A: number = 0x00;
     status_flags: number = 0;
     target_address: number | undefined = undefined;
-    target_address_memory: number | undefined = undefined;
+    target_address_value: number | undefined = undefined;
     indirectOffsetBase: number | undefined = undefined;
     indirectOffset: number | undefined = undefined;
     ppu_scanline: number = 0;
@@ -67,6 +67,7 @@ export class Cpu2A03 {
     debug_break_on_next_instruction: boolean = false;
     currentInstructionAddressFunction: AddressFunction | undefined = undefined;
     tempAddressArg: number = 0x00;
+    hasOopsCycles: boolean = false;
 
     constructor(nes: Nes) {
         this.nes = nes;
@@ -82,8 +83,9 @@ export class Cpu2A03 {
         this.register_PC = this.nes.read16(0xFFFC);
         this.current_instruction = undefined;
         this.cpuCycles = 0;
+        this.hasOopsCycles = false;
         this.register_OAMDMA = undefined;
-        this.register_PC = 0x6000;
+        //this.register_PC = 0x6000;
         console.log(`Initial PC: ${numberToHex(this.register_PC)}`);
     }
 
@@ -140,6 +142,7 @@ export class Cpu2A03 {
     private setInstruction(instruction: Instruction) {
         this.currentInstructionCycle = -1;
         this.currentInstructionAddress = undefined;
+        this.hasOopsCycles = false;
         this.current_instruction = instruction;
     }
 
@@ -331,15 +334,13 @@ export class Cpu2A03 {
 
     // RRA - Rotate Right and Accumulator
     processInstruction_RRA(): boolean {
-        let address = this.currentInstructionAddress;
-
-        let value = this.nes.read(address!);
-        if (this.currentInstructionCycle == 1)
+        if (this.currentInstructionCycle <= 1)
             return false;
+
+        let address = this.currentInstructionAddress;
+        let value = this.nes.read(address!);
 
         this.nes.write(address!, value); // Read, modify, write back
-        if (this.currentInstructionCycle == 2)
-            return false;
 
         const result = (value >> 1) | ((this.status_flags & this.FLAG_CARRY) != 0 ? 1 << 7 : 0);
         this.nes.write(address!, result);
@@ -360,15 +361,14 @@ export class Cpu2A03 {
 
     // SRE - Shift Right and Logical OR
     processInstruction_SRE(): boolean {
+        if (this.currentInstructionCycle <= 1)
+            return false;
+
         let address = this.currentInstructionAddress;
         let value = this.nes.read(address!);
 
-        if (this.currentInstructionCycle == 1)
-            return false;
 
         this.nes.write(address!, value); // Read, modify, write back
-        if (this.currentInstructionCycle == 2)
-            return false;
 
         const result = (value >> 1);
         this.nes.write(address!, result);
@@ -383,15 +383,14 @@ export class Cpu2A03 {
 
     // RLA - Rotate Left and Logical AND
     processInstruction_RLA(): boolean {
+        if (this.currentInstructionCycle <= 1)
+            return false;
+
         let address = this.currentInstructionAddress;
         const value = this.nes.read(address!);
-        if (this.currentInstructionCycle == 1)
-            return false;
 
         const newValue = ((value << 1) | ((this.status_flags & this.FLAG_CARRY) != 0 ? 1 : 0)) & 0xFF;
         this.nes.write(address!, newValue);
-        if (this.currentInstructionCycle == 2)
-            return false;
 
         const result = this.register_A & newValue;
         this.register_A = result & 0xFF;
@@ -404,15 +403,13 @@ export class Cpu2A03 {
 
     // SLO - Shift Left and Logical OR
     processInstruction_SLO(): boolean {
-        let address = this.currentInstructionAddress;
-        const value = this.nes.read(address!);
-        if (this.currentInstructionCycle == 1)
+        if (this.currentInstructionCycle <= 1)
             return false;
 
+        let address = this.currentInstructionAddress;
+        const value = this.nes.read(address!);
         const newValue = (value << 1) & 0xFF;
         this.nes.write(address!, newValue);
-        if (this.currentInstructionCycle == 2)
-            return false;
 
         const result = this.register_A | newValue;
         this.register_A = result & 0xFF;
@@ -425,7 +422,7 @@ export class Cpu2A03 {
 
     // ISB - Increment Memory and Subtract
     processInstruction_ISB(): boolean {
-        if (this.currentInstructionCycle <= 2)
+        if (this.currentInstructionCycle <= 1)
             return false;
 
         let address = this.currentInstructionAddress;
@@ -449,7 +446,7 @@ export class Cpu2A03 {
 
     // DCP - Decrement Memory and Compare
     processInstruction_DCP(): boolean {
-        if (this.currentInstructionCycle <= 2)
+        if (this.currentInstructionCycle <= 1)
             return false;
 
         let address = this.currentInstructionAddress;
@@ -469,9 +466,6 @@ export class Cpu2A03 {
 
     // SAX - Store Accumulator and Index X
     processInstruction_SAX(): boolean {
-        if (this.currentInstructionCycle == 0)
-            return false;
-
         let address = this.currentInstructionAddress;
 
         const value = (this.register_A & this.register_X) & 0xFF;
@@ -481,9 +475,6 @@ export class Cpu2A03 {
 
     // LAX - Load Accumulator and Index X
     processInstruction_LAX(): boolean {
-        if (this.currentInstructionCycle == 0)
-            return false;
-
         let value = this.nes.read(this.currentInstructionAddress!);
 
         this.toggleFlag(this.FLAG_ZERO, value == 0);
@@ -496,7 +487,7 @@ export class Cpu2A03 {
 
     // ROL - Rotate Left
     processInstruction_ROL(): boolean {
-        if (this.currentInstructionCycle <= 2)
+        if (this.currentInstructionCycle <= 1 && this.currentInstructionAddressingMode != AddressingMode.Accumulator)
             return false;
 
         let address = this.currentInstructionAddress;
@@ -513,7 +504,7 @@ export class Cpu2A03 {
 
     // ROR - Rotate Right
     processInstruction_ROR(): boolean {
-        if (this.currentInstructionCycle <= 2)
+        if (this.currentInstructionCycle <= 1 && this.currentInstructionAddressingMode != AddressingMode.Accumulator)
             return false;
 
         let address = this.currentInstructionAddress;
@@ -530,7 +521,7 @@ export class Cpu2A03 {
 
     // LSR - Logical Shift Right
     processInstruction_LSR(): boolean {
-        if (this.currentInstructionCycle <= 2)
+        if (this.currentInstructionCycle <= 1 && this.currentInstructionAddressingMode != AddressingMode.Accumulator)
             return false;
 
         let address = this.currentInstructionAddress;
@@ -592,17 +583,13 @@ export class Cpu2A03 {
 
     // DEC - Decrement Memory
     processInstruction_DEC(): boolean {
-        if (this.currentInstructionCycle <= 2) {
-            return false;
-        }
-
         let value = this.loadValue();
-        if (this.currentInstructionCycle == 3) {
+        if (this.currentInstructionCycle == 0) {
             return false;
         }
 
         this.nes.write(this.currentInstructionAddress!, value); // Read, modify, write back
-        if (this.currentInstructionCycle == 4) {
+        if (this.currentInstructionCycle == 1) {
             return false;
         }
 
@@ -634,17 +621,13 @@ export class Cpu2A03 {
 
     // INC - Increment Memory
     processInstruction_INC(): boolean {
-        if (this.currentInstructionCycle <= 2) {
-            return false;
-        }
-
         let value = this.nes.read(this.currentInstructionAddress!);
-        if (this.currentInstructionCycle == 3) {
+        if (this.currentInstructionCycle == 0) {
             return false;
         }
 
         this.nes.write(this.currentInstructionAddress!, value); // Read, modify, write back
-        if (this.currentInstructionCycle == 4) {
+        if (this.currentInstructionCycle == 1) {
             return false;
         }
 
@@ -734,6 +717,11 @@ export class Cpu2A03 {
             if (this.currentInstructionCycle == 0) {
                 return false;
             }
+
+            if (this.hasOopsCycles && this.currentInstructionCycle == 1) {
+                return false;
+            }
+
             this.register_PC = this.currentInstructionAddress!;
         }
 
@@ -746,6 +734,11 @@ export class Cpu2A03 {
             if (this.currentInstructionCycle == 0) {
                 return false;
             }
+
+            if (this.hasOopsCycles && this.currentInstructionCycle == 1) {
+                return false;
+            }
+
             this.register_PC = this.currentInstructionAddress!;
         }
 
@@ -758,6 +751,11 @@ export class Cpu2A03 {
             if (this.currentInstructionCycle == 0) {
                 return false;
             }
+
+            if (this.hasOopsCycles && this.currentInstructionCycle == 1) {
+                return false;
+            }
+
             this.register_PC = this.currentInstructionAddress!;
         }
 
@@ -770,6 +768,11 @@ export class Cpu2A03 {
             if (this.currentInstructionCycle == 0) {
                 return false;
             }
+
+            if (this.hasOopsCycles && this.currentInstructionCycle == 1) {
+                return false;
+            }
+
             this.register_PC = this.currentInstructionAddress!;
         }
 
@@ -782,6 +785,11 @@ export class Cpu2A03 {
             if (this.currentInstructionCycle == 0) {
                 return false;
             }
+
+            if (this.hasOopsCycles && this.currentInstructionCycle == 1) {
+                return false;
+            }
+
             this.register_PC = this.currentInstructionAddress!;
         }
 
@@ -794,6 +802,11 @@ export class Cpu2A03 {
             if (this.currentInstructionCycle == 0) {
                 return false;
             }
+
+            if (this.hasOopsCycles && this.currentInstructionCycle == 1) {
+                return false;
+            }
+
             this.register_PC = this.currentInstructionAddress!;
         }
 
@@ -806,6 +819,11 @@ export class Cpu2A03 {
             if (this.currentInstructionCycle == 0) {
                 return false;
             }
+
+            if (this.hasOopsCycles && this.currentInstructionCycle == 1) {
+                return false;
+            }
+
             this.register_PC = this.currentInstructionAddress!;
         }
 
@@ -818,6 +836,11 @@ export class Cpu2A03 {
             if (this.currentInstructionCycle == 0) {
                 return false;
             }
+
+            if (this.hasOopsCycles && this.currentInstructionCycle == 1) {
+                return false;
+            }
+
             this.register_PC = this.currentInstructionAddress!;
         }
 
@@ -826,10 +849,6 @@ export class Cpu2A03 {
 
     // CMP - Compare
     processInstruction_CMP(): boolean {
-        if (this.currentInstructionCycle == 0) {
-            return false;
-        }
-
         const value = this.loadValue();
         const result = (this.register_A - value) & 0xFF;
 
@@ -841,10 +860,6 @@ export class Cpu2A03 {
 
     // CPX - Compare X Register
     processInstruction_CPX(): boolean {
-        if (this.currentInstructionCycle == 0) {
-            return false;
-        }
-
         const value = this.loadValue();
         const result = this.register_X - value;
 
@@ -856,10 +871,6 @@ export class Cpu2A03 {
 
     // CPY - Compare Y Register
     processInstruction_CPY(): boolean {
-        if (this.currentInstructionCycle == 0) {
-            return false;
-        }
-
         const value = this.loadValue();
         const result = this.register_Y - value;
 
@@ -927,18 +938,11 @@ export class Cpu2A03 {
         return true;
     }
 
-    processInstruction_NOP_ReadAddress(): boolean {
-        if (this.currentInstructionCycle == 0)
-            return false;
-
-        return true;
-    }
-
     // STX - Store X Register
     processInstruction_STX(): boolean {
 
         if (this.nes.isNormalAddress(this.currentInstructionAddress!)) {
-            this.instructionResult.target_address_memory = this.nes.read(this.currentInstructionAddress!);
+            this.instructionResult.target_address_value = this.nes.read(this.currentInstructionAddress!);
         }
 
         this.nes.write(this.currentInstructionAddress!, this.register_X);
@@ -948,7 +952,7 @@ export class Cpu2A03 {
     // STY - Store Y Register
     processInstruction_STY(): boolean {
         if (this.nes.isNormalAddress(this.currentInstructionAddress!)) {
-            this.instructionResult.target_address_memory = this.nes.read(this.currentInstructionAddress!);
+            this.instructionResult.target_address_value = this.nes.read(this.currentInstructionAddress!);
         }
         this.nes.write(this.currentInstructionAddress!, this.register_Y);
         return true;
@@ -957,7 +961,7 @@ export class Cpu2A03 {
     // STA - Store Accumulator
     processInstruction_STA(): boolean {
         if (this.nes.isNormalAddress(this.currentInstructionAddress!)) {
-            this.instructionResult.target_address_memory = this.nes.read(this.currentInstructionAddress!);
+            this.instructionResult.target_address_value = this.nes.read(this.currentInstructionAddress!);
         }
         this.nes.write(this.currentInstructionAddress!, this.register_A);
         return true;
@@ -1000,14 +1004,19 @@ export class Cpu2A03 {
 
     // JMP - Jump
     processInstruction_JMP(): boolean {
+        if (this.currentInstructionAddressingMode == AddressingMode.Indirect && this.currentInstructionCycle == 0) {
+            return false;
+        }
+
         this.register_PC = this.currentInstructionAddress!;
+
         return true;
     }
 
 
     // JSR - Jump to Subroutine
     processInstruction_JSR(): boolean {
-        if (this.currentInstructionCycle <= 3)
+        if (this.currentInstructionCycle <= 2)
             return false;
 
         this.pushStack16(this.register_PC - 1);
@@ -1017,7 +1026,7 @@ export class Cpu2A03 {
 
     // RTS - Return from Subroutine
     processInstruction_RTS(): boolean {
-        if (this.currentInstructionCycle <= 4)
+        if (this.currentInstructionCycle <= 3)
             return false;
 
         this.register_PC = this.popStack16() + 1;
@@ -1026,10 +1035,10 @@ export class Cpu2A03 {
 
     // RTI - Return from Interrupt
     processInstruction_RTI(): boolean {
-        if (this.currentInstructionCycle <= 4)
+        if (this.currentInstructionCycle <= 3)
             return false;
 
-        this.status_flags = this.popStack();
+        this.status_flags = this.popStack() | (this.status_flags & this.FLAG_BREAK);
         this.register_PC = this.popStack16();
 
         if (this.nes.breakOnRti) {
@@ -1040,7 +1049,7 @@ export class Cpu2A03 {
 
     // ASL - Arithmetic Shift Left
     processInstruction_ASL(): boolean {
-        if (this.currentInstructionCycle <= 2)
+        if (this.currentInstructionCycle <= 1 && this.currentInstructionAddressingMode != AddressingMode.Accumulator)
             return false;
 
         const value = this.loadValue();
@@ -1056,9 +1065,6 @@ export class Cpu2A03 {
 
     // AND - Logical AND
     processInstruction_AND(): boolean {
-        if (this.currentInstructionCycle == 0)
-            return false;
-
         const value = this.loadValue();
         this.register_A = this.register_A & value;
 
@@ -1069,9 +1075,6 @@ export class Cpu2A03 {
 
     // BIT - Test Bits
     processInstruction_BIT(): boolean {
-        if (this.currentInstructionCycle == 0)
-            return false;
-
         const value = this.loadValue();
         const result = this.register_A & value;
 
@@ -1079,9 +1082,6 @@ export class Cpu2A03 {
         this.toggleFlag(this.FLAG_OVERFLOW, (value & (1 << 6)) != 0);
         this.toggleFlag(this.FLAG_NEGATIVE, (value & (1 << 7)) != 0);
 
-        if (this.nes.isNormalAddress(this.currentInstructionAddress!)) {
-            this.instructionResult.target_address_memory = this.nes.read(this.currentInstructionAddress!);
-        }
         return true;
     }
 
@@ -1139,13 +1139,13 @@ export class Cpu2A03 {
     private loadValue(): number {
         if (this.currentInstructionAddressingMode == AddressingMode.Immediate) {
             const value = this.nes.read(this.register_PC);
-            this.instructionResult.target_address_memory = value;
+            this.instructionResult.target_address_value = value;
             this.advancePC();
             return value;
         }
         else {
             const value = this.nes.read(this.currentInstructionAddress!);
-            this.instructionResult.target_address_memory = value;
+            this.instructionResult.target_address_value = value;
             return value;
         }
     }
@@ -1209,9 +1209,6 @@ export class Cpu2A03 {
     }
 
     getRelativeAddress(): boolean {
-        if (this.currentInstructionCycle == 1)
-            return true; // Return from oops cycle
-
         const arg = this.nes.read(this.register_PC);
         if (this.currentInstructionCycle == 0)
             this.advancePC();
@@ -1222,9 +1219,7 @@ export class Cpu2A03 {
 
         const pc_low_byte = this.register_PC & 0xFF;
         if (pc_low_byte + address > 0xFF || pc_low_byte + address < 0) {
-            // Oops cycle
-            if (this.currentInstructionCycle == 0)
-                return false;
+            this.hasOopsCycles = true;
         }
 
         return true;
@@ -1258,14 +1253,12 @@ export class Cpu2A03 {
         const lowByte = this.currentInstructionAddress & 0xFF;
 
         if (this.isStoreInstruction() || lowByte + this.register_Y > 0xFF) {
-            // Oops cycle
-            if (this.currentInstructionCycle == 3)
-                return false;
+            this.hasOopsCycles = true;
         }
 
         const finalAddress = (this.currentInstructionAddress + this.register_Y) % 0x10000;
 
-        //this.instructionResult.indirectOffset = arg + this.register_Y;
+        this.instructionResult.indirectOffset = (this.tempAddressArg + this.register_Y) % 0x100;
 
         //console.log(`getIndirectYAddress (${numberToHex(arg)},Y) @ ${numberToHex(this.register_Y)} = ${numberToHex(finalAddress)} L:${numberToHex(lowByte)} H:${numberToHex(highByte)}`);
 
@@ -1304,7 +1297,7 @@ export class Cpu2A03 {
         //console.log(`LDA (${numberToHex(arg)},X) @ ${numberToHex(this.register_X)} = ${numberToHex(address)} ZPA1: ${numberToHex(zeroPageAddress)} ZPA2: ${numberToHex(zeroPageAddress2)}`);
         //val = PEEK(  PEEK((arg + X) % 256) + PEEK( (arg + X + 1) % 256) 256  )	
 
-        //this.instructionResult.indirectOffset = arg + this.register_X;
+        this.instructionResult.indirectOffset = (this.tempAddressArg + this.register_X) % 0xFF;
         return true;
     }
 
@@ -1330,8 +1323,7 @@ export class Cpu2A03 {
             const lowByte = this.currentInstructionAddress & 0xFF;
 
             if (this.isStoreInstruction() || lowByte + this.register_X > 0xFF) {
-                // Oops cycle
-                return false;
+                this.hasOopsCycles = true;
             }
         }
 
@@ -1347,26 +1339,25 @@ export class Cpu2A03 {
             return false;
         }
 
+        if (this.currentInstructionAddress == undefined)
+            throw new Error(`currentInstructionAddress should be set by now!`);
+
         if (this.currentInstructionCycle == 1) {
             const highByte = this.nes.read(this.register_PC) << 8;
-            if (this.currentInstructionAddress) {
-                this.currentInstructionAddress |= highByte;
-            }
+            this.currentInstructionAddress |= highByte;
             this.advancePC();
             return false;
         }
 
-        if (this.currentInstructionAddress) {
-            if (this.currentInstructionCycle == 2) {
-                const lowByte = this.currentInstructionAddress & 0xFF;
-                if (this.isStoreInstruction() || lowByte + this.register_Y > 0xFF) {
-                    // Oops cycle
-                    return false;
-                }
+        if (this.currentInstructionCycle == 2) {
+            const lowByte = this.currentInstructionAddress & 0xFF;
+            if (this.isStoreInstruction() || lowByte + this.register_Y > 0xFF) {
+                this.hasOopsCycles = true;
             }
-
-            this.currentInstructionAddress = (this.currentInstructionAddress + this.register_Y) % 0x10000;
         }
+
+        this.currentInstructionAddress = (this.currentInstructionAddress + this.register_Y) % 0x10000;
+
 
         return true;
     }
@@ -1511,6 +1502,9 @@ export class Cpu2A03 {
             this.instructionResult.instructionMetadata?.name == "DCP" ||
             this.instructionResult.instructionMetadata?.name == "ISB" ||
             this.instructionResult.instructionMetadata?.name == "SLO" ||
+            this.instructionResult.instructionMetadata?.name == "SRE" ||
+            this.instructionResult.instructionMetadata?.name == "RLA" ||
+            this.instructionResult.instructionMetadata?.name == "RRA" ||
             this.instructionResult.instructionMetadata?.name.startsWith("AS"))
             ?? false;
     }
@@ -1595,22 +1589,22 @@ export class Cpu2A03 {
                 instructionFunc = this.processInstruction_STA;
                 break;
             case "NOP":
-                instructionFunc = () => this.processInstruction_NOP(0, 0);
+                instructionFunc = (): boolean => { return this.processInstruction_NOP(0, 0); }
                 break;
             case "*NOP":
-                instructionFunc = () => this.processInstruction_NOP(1, 1);
+                instructionFunc = (): boolean => { return this.processInstruction_NOP(1, 1); }
                 break;
             case "!NOP":
-                instructionFunc = () => this.processInstruction_NOP(2, 2);
+                instructionFunc = (): boolean => { return this.processInstruction_NOP(2, 2); }
                 break;
             case "&NOP":
-                instructionFunc = () => this.processInstruction_NOP(2, 1);
+                instructionFunc = (): boolean => { return this.processInstruction_NOP(2, 1); }
                 break;
             case "+NOP":
-                instructionFunc = () => this.processInstruction_NOP(0, 1);
+                instructionFunc = (): boolean => { return this.processInstruction_NOP(0, 1); }
                 break;
             case "@NOP":
-                instructionFunc = this.processInstruction_NOP_ReadAddress;
+                instructionFunc = (): boolean => { return this.processInstruction_NOP(0, 0); }
                 break;
             case "SEC":
                 instructionFunc = this.processInstruction_SEC;
@@ -1762,7 +1756,10 @@ export class Cpu2A03 {
                 throw new Error(`Instruction function is undefined!`);
             }
 
-            //console.log(`Instruction: ${instructionData.name} instr_cycles: ${cpu.currentInstructionCycle} Addressing mode: ${AddressingModeNames[cpu.currentInstructionAddressingMode]} Cycles: ${cpu.cpuCycles} address function: ${cpu.currentInstructionAddressFunction} PC: ${numberToHex(cpu.register_PC)}`);
+            if (cpu.currentInstructionCycle == -2) {
+                // Finish oops cycle
+                return true;
+            }
 
             if (cpu.currentInstructionAddressFunction != undefined) {
                 cpu.currentInstructionCycle++;
@@ -1790,6 +1787,11 @@ export class Cpu2A03 {
 
             const result = instructionFunc.call(cpu);
             cpu.currentInstructionCycle++;
+
+            if (result && cpu.hasOopsCycles && (instructionData.checkForOopsCycle || cpu.isStoreInstruction())) {
+                cpu.currentInstructionCycle = -2;
+                return false;
+            }
             return result;
         };
 
