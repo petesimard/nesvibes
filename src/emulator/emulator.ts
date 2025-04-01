@@ -129,7 +129,7 @@ export class NesVibes {
                 const canvas = document.getElementById('canvas')!;
                 p5.createCanvas(256 * this.scale, (240 - (this.overscan ? 16 : 0)) * this.scale).parent(canvas);
                 p5.background(0);
-                p5.frameRate(90);
+                p5.frameRate(60);
             };
         };
 

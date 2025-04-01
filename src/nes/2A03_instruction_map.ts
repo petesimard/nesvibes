@@ -333,4 +333,11 @@ instructionMap[0x7B] = { name: 'RRA', mode: AddressingMode.AbsoluteY, cycles: 7,
 instructionMap[0x63] = { name: 'RRA', mode: AddressingMode.IndirectX, cycles: 8, instruction_length: 2 }; // Unofficial
 instructionMap[0x73] = { name: 'RRA', mode: AddressingMode.IndirectY, cycles: 8, instruction_length: 2 }; // Unofficial
 
+instructionMap[0x100] = { name: 'NMI', mode: AddressingMode.Implied, cycles: 2, instruction_length: 2 };
+instructionMap[0x101] = { name: 'IRQ', mode: AddressingMode.Implied, cycles: 2, instruction_length: 2 };
+instructionMap[0x102] = { name: 'DMA', mode: AddressingMode.Implied, cycles: 2, instruction_length: 2 };
+
+
+
+
 export default instructionMap;

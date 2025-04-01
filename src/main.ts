@@ -2,8 +2,8 @@ import { NesVibes } from './emulator/emulator';
 
 const nesVibes = new NesVibes();
 //const rom = "r/Zelda - The Legend of Zelda.zip";
-//const rom = "roms/Super Mario Bros. 2 (Europe).zip";
-const rom = "roms/nestest.nes";
+const rom = "roms/Super Mario Bros. 2 (Europe).zip";
+//const rom = "roms/nestest.nes";
 
 declare global {
     interface Window {

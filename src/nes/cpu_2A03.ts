@@ -69,8 +69,16 @@ export class Cpu2A03 {
     tempAddressArg: number = 0x00;
     hasOopsCycles: boolean = false;
 
+    nmiInstruction: Instruction;
+    irqInstruction: Instruction;
+    dmaInstruction: Instruction;
+
     constructor(nes: Nes) {
         this.nes = nes;
+
+        this.nmiInstruction = this.wrapInstruction(this.ExecuteNMI, instructionMap[0x100]);
+        this.irqInstruction = this.wrapInstruction(this.ExecuteIRQ, instructionMap[0x101]);
+        this.dmaInstruction = this.wrapInstruction(this.ExecuteOAMDMA, instructionMap[0x102]);
     }
 
     onReset() {
@@ -112,16 +120,19 @@ export class Cpu2A03 {
             this.pendingNonMaskableInterruptFlag = false;
             this.pendingIRQFlag = false;
             this.currentInstructionAddressingMode = AddressingMode.Implied;
-            this.setInstruction(this.ExecuteNMI);
+            this.setInstruction(this.nmiInstruction);
+            this.currentInstructionCycle = 0;
         }
         else if (this.register_OAMDMA != undefined) {
             this.currentInstructionAddressingMode = AddressingMode.Implied;
-            this.setInstruction(this.ExecuteOAMDMA);
+            this.setInstruction(this.dmaInstruction);
+            this.currentInstructionCycle = 0;
         }
         else if (this.pendingIRQFlag) {
             this.pendingIRQFlag = false;
             this.currentInstructionAddressingMode = AddressingMode.Implied;
-            this.setInstruction(this.execute_IRQ);
+            this.setInstruction(this.irqInstruction);
+            this.currentInstructionCycle = 0;
         }
         else {
 
@@ -285,10 +296,8 @@ export class Cpu2A03 {
         if (this.currentInstructionCycle == 5) {
             this.register_PC = this.nes.read16(0xFFFA);
             this.toggleFlag(this.FLAG_INTERRUPT, true);
-        }
-
-        if (this.currentInstructionCycle <= 6)
             return false;
+        }
 
         return true;
     }
@@ -306,7 +315,7 @@ export class Cpu2A03 {
     }
 
     // IRQ - Interrupt Request
-    execute_IRQ(): boolean {
+    ExecuteIRQ(): boolean {
         if (this.currentInstructionCycle == 0) {
             const currentPC = this.register_PC;
             this.toggleFlag(this.FLAG_INTERRUPT, true);
@@ -324,10 +333,8 @@ export class Cpu2A03 {
 
         if (this.currentInstructionCycle == 5) {
             this.register_PC = this.nes.read16(0xFFFE);
-        }
-
-        if (this.currentInstructionCycle <= 6)
             return false;
+        }
 
         return true;
     }
@@ -1749,6 +1756,18 @@ export class Cpu2A03 {
                 throw new Error(`Unknown instruction: ${instructionData.name}`);
         }
 
+        const wrappedInstruction = this.wrapInstruction(instructionFunc, instructionData);
+
+        instructionData.instruction = wrappedInstruction;
+
+        if (instructionData.instruction == undefined) {
+            throw new Error(`Unknown instruction: ${instructionData.name}`);
+        }
+
+        return wrappedInstruction;
+    }
+
+    private wrapInstruction(instructionFunc: Instruction, instructionData: InstructionMetadata) {
         const cpu = this;
 
         const wrappedInstruction = function (): boolean {
@@ -1784,7 +1803,6 @@ export class Cpu2A03 {
 
 
             //console.log(`After Memory = clock: ${cpu.cpuCycles} ${AddressingModeNames[cpu.currentInstructionAddressingMode]} ${cpu.currentInstructionAddress}`);
-
             const result = instructionFunc.call(cpu);
             cpu.currentInstructionCycle++;
 
@@ -1794,13 +1812,6 @@ export class Cpu2A03 {
             }
             return result;
         };
-
-        instructionData.instruction = wrappedInstruction;
-
-        if (instructionData.instruction == undefined) {
-            throw new Error(`Unknown instruction: ${instructionData.name}`);
-        }
-
         return wrappedInstruction;
     }
 }

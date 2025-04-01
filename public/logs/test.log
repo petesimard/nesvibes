@@ -34349,7 +34349,7 @@ C2C4  F0 0D     BEQ $C2D3                       A:62 X:18 Y:FF P:24 SP:FD PPU:19
 C2C6  8D 07 20  STA $2007                       A:62 X:18 Y:FF P:24 SP:FD PPU:193, 10 CYC:111283
 C2C9  C8        INY                             A:62 X:18 Y:FF P:24 SP:FD PPU:193, 22 CYC:111287
 C2CA  D0 02     BNE $C2CE                       A:62 X:18 Y:00 P:26 SP:FD PPU:193, 28 CYC:111289
-C2CC  E6 D1     INC $D1                         A:62 X:18 Y:00 P:26 SP:FD PPU:193, 34 CYC:111291
+C2CC  E6 D1     INC $D1 = C3                    A:62 X:18 Y:00 P:26 SP:FD PPU:193, 34 CYC:111291
 C2CE  CA        DEX                             A:62 X:18 Y:00 P:A4 SP:FD PPU:193, 49 CYC:111296
 C2CF  D0 ED     BNE $C2BE                       A:62 X:17 Y:00 P:24 SP:FD PPU:193, 55 CYC:111298
 C2BE  B1 D0     LDA ($D0),Y = C407 @ C407 = 73  A:62 X:17 Y:00 P:24 SP:FD PPU:193, 64 CYC:111301
