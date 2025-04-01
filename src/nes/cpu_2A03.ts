@@ -475,7 +475,7 @@ export class Cpu2A03 {
 
     // LAX - Load Accumulator and Index X
     processInstruction_LAX(): boolean {
-        let value = this.nes.read(this.currentInstructionAddress!);
+        let value = this.loadValue();
 
         this.toggleFlag(this.FLAG_ZERO, value == 0);
         this.toggleFlag(this.FLAG_NEGATIVE, (value & (1 << 7)) != 0);
@@ -583,21 +583,21 @@ export class Cpu2A03 {
 
     // DEC - Decrement Memory
     processInstruction_DEC(): boolean {
-        let value = this.loadValue();
         if (this.currentInstructionCycle == 0) {
+            this.tempAddressArg = this.loadValue();
             return false;
         }
 
-        this.nes.write(this.currentInstructionAddress!, value); // Read, modify, write back
         if (this.currentInstructionCycle == 1) {
+            this.nes.write(this.currentInstructionAddress!, this.tempAddressArg); // Read, modify, write back
             return false;
         }
 
-        value = (value - 1) & 0xFF;
-        this.nes.write(this.currentInstructionAddress!, value);
+        this.tempAddressArg = (this.tempAddressArg - 1) & 0xFF;
+        this.nes.write(this.currentInstructionAddress!, this.tempAddressArg);
 
-        this.toggleFlag(this.FLAG_ZERO, value == 0);
-        this.toggleFlag(this.FLAG_NEGATIVE, (value & (1 << 7)) != 0);
+        this.toggleFlag(this.FLAG_ZERO, this.tempAddressArg == 0);
+        this.toggleFlag(this.FLAG_NEGATIVE, (this.tempAddressArg & (1 << 7)) != 0);
         return true;
     }
 
@@ -621,21 +621,21 @@ export class Cpu2A03 {
 
     // INC - Increment Memory
     processInstruction_INC(): boolean {
-        let value = this.nes.read(this.currentInstructionAddress!);
         if (this.currentInstructionCycle == 0) {
+            this.tempAddressArg = this.loadValue();
             return false;
         }
 
-        this.nes.write(this.currentInstructionAddress!, value); // Read, modify, write back
         if (this.currentInstructionCycle == 1) {
+            this.nes.write(this.currentInstructionAddress!, this.tempAddressArg); // Read, modify, write back
             return false;
         }
 
-        value = (value + 1) & 0xFF;
-        this.nes.write(this.currentInstructionAddress!, value);
+        this.tempAddressArg = (this.tempAddressArg + 1) & 0xFF;
+        this.nes.write(this.currentInstructionAddress!, this.tempAddressArg);
 
-        this.toggleFlag(this.FLAG_ZERO, value == 0);
-        this.toggleFlag(this.FLAG_NEGATIVE, (value & (1 << 7)) != 0);
+        this.toggleFlag(this.FLAG_ZERO, this.tempAddressArg == 0);
+        this.toggleFlag(this.FLAG_NEGATIVE, (this.tempAddressArg & (1 << 7)) != 0);
         return true;
     }
 

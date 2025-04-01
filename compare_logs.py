@@ -108,4 +108,4 @@ def compare_logs(reference_log: str, test_log: str) -> None:
         print(f"Test log: {len(test_lines)} lines")
 
 if __name__ == "__main__":
-    compare_logs("public/logs/nestest.log", "public/logs/test.log") 
+    compare_logs("public/logs/test_w.log", "public/logs/test.log") 
