@@ -2,8 +2,8 @@ import { numberToHex, u8toSigned } from "../emulator/utils";
 import { AddressingMode, AddressingModeNames, instructionMap, InstructionMetadata } from "./2A03_instruction_map";
 import { Nes } from "./nes";
 
-export type Instruction = Generator;
-export type InstructionFunc = (mode: AddressingMode) => Instruction;
+export type Instruction = () => boolean;
+export type AddressFunction = () => boolean;
 
 const DEBUG_BREAKPOINT_CYCLE: number | undefined = undefined;
 //const DEBUG_BREAKPOINT_CYCLE: number | undefined = 2560;
@@ -39,6 +39,7 @@ export class Cpu2A03 {
     register_Y: number = 0x00;
     register_A: number = 0x00;
     register_OAMDMA: number | undefined = undefined;
+    oamDataCount: number = 0;
 
 
     FLAG_CARRY: number = 1 << 0;
@@ -56,11 +57,16 @@ export class Cpu2A03 {
     STACK_START: number = 0x0100;
 
     status_flags: number = this.FLAG_INTERRUPT;
-    instruction: Instruction | undefined = undefined;
+    current_instruction: Instruction | undefined = undefined;
+    currentInstructionCycle: number = 0;
+    currentInstructionAddressingMode: AddressingMode = AddressingMode.Implied;
+    currentInstructionAddress: number | undefined = undefined;
     addressRegister: number = 0x00;
     instructionResult: InstructionResult = new InstructionResult();
     pendingInterruptDisableFlag: boolean | undefined = undefined;
     debug_break_on_next_instruction: boolean = false;
+    currentInstructionAddressFunction: AddressFunction | undefined = undefined;
+    tempAddressArg: number = 0x00;
 
     constructor(nes: Nes) {
         this.nes = nes;
@@ -74,10 +80,10 @@ export class Cpu2A03 {
         this.register_SP = 0xFD;
         this.register_A = 0x00;
         this.register_PC = this.nes.read16(0xFFFC);
-        this.instruction = undefined;
+        this.current_instruction = undefined;
         this.cpuCycles = 0;
         this.register_OAMDMA = undefined;
-        //this.register_PC = 0x6000;
+        this.register_PC = 0x6000;
         console.log(`Initial PC: ${numberToHex(this.register_PC)}`);
     }
 
@@ -89,7 +95,7 @@ export class Cpu2A03 {
         }
 
         //console.log(`Clock Start PC: ${numberToHex(this.register_PC)}`);
-        if (this.instruction != undefined) {
+        if (this.current_instruction != undefined) {
             this.processCurrentInstruction();
             return;
         }
@@ -103,17 +109,17 @@ export class Cpu2A03 {
         if (this.pendingNonMaskableInterruptFlag) {
             this.pendingNonMaskableInterruptFlag = false;
             this.pendingIRQFlag = false;
-            this.instruction = this.ExecuteNMI();
-            this.logInstruction(0x00);
+            this.currentInstructionAddressingMode = AddressingMode.Implied;
+            this.setInstruction(this.ExecuteNMI);
         }
         else if (this.register_OAMDMA != undefined) {
-            this.instruction = this.ExecuteOAMDMA();
-            this.logInstruction(0x00);
+            this.currentInstructionAddressingMode = AddressingMode.Implied;
+            this.setInstruction(this.ExecuteOAMDMA);
         }
         else if (this.pendingIRQFlag) {
             this.pendingIRQFlag = false;
-            this.instruction = this.execute_IRQ();
-            this.logInstruction(0x00);
+            this.currentInstructionAddressingMode = AddressingMode.Implied;
+            this.setInstruction(this.execute_IRQ);
         }
         else {
 
@@ -121,9 +127,9 @@ export class Cpu2A03 {
             this.logInstruction(instructionOpCode);
 
             //console.log(`Instruction: ${numberToHex(instructionOpCode)}`);
-            this.instruction = this.getInstructionFunc(instructionOpCode);
+            const newInstruction = this.getInstructionFunc(instructionOpCode);
+            this.setInstruction(newInstruction);
             this.toggleFlag(this.FLAG_BREAK, true);
-
             // Advance PC to next instruction
             this.advancePC();
         }
@@ -131,14 +137,21 @@ export class Cpu2A03 {
         this.processCurrentInstruction();
     }
 
+    private setInstruction(instruction: Instruction) {
+        this.currentInstructionCycle = -1;
+        this.currentInstructionAddress = undefined;
+        this.current_instruction = instruction;
+    }
+
     private processCurrentInstruction() {
-        if (this.instruction == undefined) {
+        if (this.current_instruction == undefined) {
             throw new Error("Instruction is undefined");
         }
 
-        const result = this.instruction.next();
-        if (result.done) {
-            this.instruction = undefined;
+        const result = this.current_instruction.call(this);
+
+        if (result) {
+            this.current_instruction = undefined;
 
             if (LOG_INSTRUCTIONS) {
                 this.nes.logInstruction(this.instructionResult);
@@ -156,7 +169,8 @@ export class Cpu2A03 {
     }
 
     setOAMDMA(value: number) {
-        this.register_OAMDMA = value;
+        this.register_OAMDMA = value << 8;
+        this.oamDataCount = 0;
         this.nes.log(`OAMDMA: ${numberToHex(value)}`);
     }
 
@@ -220,42 +234,64 @@ export class Cpu2A03 {
         this.instructionResult.ppu_dot = this.nes.getPpu().current_dot;
     }
 
-    * ExecuteOAMDMA(): Instruction {
-        yield;
 
-        let baseAddress = this.register_OAMDMA! << 8;
+    ExecuteOAMDMA(): boolean {
+        if (this.currentInstructionCycle < 2 || this.currentInstructionCycle % 2 != 0) {
+            return false;
+        }
 
-        for (let i = 0; i < 256; i++) {
-            const address = baseAddress + i;
-            const value = this.nes.read(address);
-            yield;
-            this.nes.write(this.nes.getPpu().register_address_OAMDATA, value);
-            yield;
+        let baseAddress = this.register_OAMDMA!;
+
+        const address = baseAddress + this.oamDataCount;
+        const value = this.nes.read(address);
+        this.nes.write(this.nes.getPpu().register_address_OAMDATA, value);
+
+        if (this.oamDataCount < 255) {
+            this.oamDataCount++;
+            return false;
         }
 
         this.register_OAMDMA = undefined;
+        return true;
     }
 
-
-    * ExecuteNMI(): Instruction {
+    ExecuteNMI(): boolean {
         const currentPC = this.register_PC;
 
-        yield;
-        yield;
-        this.pushStack(currentPC >> 8);
-        yield;
-        this.pushStack(currentPC & 0xFF);
-        yield;
-        this.pushStack(this.status_flags & ~this.FLAG_BREAK);
-        yield;
-        this.register_PC = this.nes.read16(0xFFFA);
-        this.toggleFlag(this.FLAG_INTERRUPT, true);
-        yield;
-        yield;
+        if (this.currentInstructionCycle <= 1)
+            return false;
+
+
+        if (this.currentInstructionCycle == 2) {
+            this.pushStack(currentPC >> 8);
+            return false;
+        }
+
+
+        if (this.currentInstructionCycle == 3) {
+            this.pushStack(currentPC & 0xFF);
+            return false;
+        }
+
+
+        if (this.currentInstructionCycle == 4) {
+            this.pushStack(this.status_flags & ~this.FLAG_BREAK);
+            return false;
+        }
+
+        if (this.currentInstructionCycle == 5) {
+            this.register_PC = this.nes.read16(0xFFFA);
+            this.toggleFlag(this.FLAG_INTERRUPT, true);
+        }
+
+        if (this.currentInstructionCycle <= 6)
+            return false;
+
+        return true;
     }
 
     // BRK - Break
-    * processInstruction_BRK(): Instruction {
+    processInstruction_BRK(): boolean {
         this.pushStack16(this.register_PC + 2);
         //console.log(`BRK ${numberToHex(this.register_PC + 2)} ${numberToHex(this.status_flags)}`);
 
@@ -263,42 +299,47 @@ export class Cpu2A03 {
         this.register_PC = this.nes.read16(0xFFFE);
 
         this.toggleFlag(this.FLAG_INTERRUPT, true);
+        return true;
     }
 
     // IRQ - Interrupt Request
-    * execute_IRQ(): Instruction {
-        const currentPC = this.register_PC;
-        this.toggleFlag(this.FLAG_INTERRUPT, true);
-        yield;
-        yield;
-        this.pushStack16(currentPC);
-        yield;
-        yield;
-        this.pushStack(this.status_flags & ~this.FLAG_BREAK);
-        yield;
-        this.register_PC = this.nes.read16(0xFFFE);
-        yield;
-        yield;
+    execute_IRQ(): boolean {
+        if (this.currentInstructionCycle == 0) {
+            const currentPC = this.register_PC;
+            this.toggleFlag(this.FLAG_INTERRUPT, true);
+            this.pushStack16(currentPC);
+        }
 
-        yield* this.noop_loop(5); // why?
+        if (this.currentInstructionCycle <= 3)
+            return false;
+
+
+        if (this.currentInstructionCycle == 4) {
+            this.pushStack(this.status_flags & ~this.FLAG_BREAK);
+            return false;
+        }
+
+        if (this.currentInstructionCycle == 5) {
+            this.register_PC = this.nes.read16(0xFFFE);
+        }
+
+        if (this.currentInstructionCycle <= 6)
+            return false;
+
+        return true;
     }
 
     // RRA - Rotate Right and Accumulator
-    * processInstruction_RRA(mode: AddressingMode): Instruction {
-        let address = undefined;
-        let addressGenerator = this.getAddressGenerator(mode);
-
-        for (address of addressGenerator) {
-            if (address == undefined) {
-                yield;
-            }
-        }
+    processInstruction_RRA(): boolean {
+        let address = this.currentInstructionAddress;
 
         let value = this.nes.read(address!);
-        yield;
+        if (this.currentInstructionCycle == 1)
+            return false;
 
         this.nes.write(address!, value); // Read, modify, write back
-        yield;
+        if (this.currentInstructionCycle == 2)
+            return false;
 
         const result = (value >> 1) | ((this.status_flags & this.FLAG_CARRY) != 0 ? 1 << 7 : 0);
         this.nes.write(address!, result);
@@ -314,25 +355,20 @@ export class Cpu2A03 {
         this.toggleFlag(this.FLAG_NEGATIVE, (adc_result & (1 << 7)) != 0);
 
         this.register_A = adc_result & 0xFF;
+        return true;
     }
 
-
     // SRE - Shift Right and Logical OR
-    * processInstruction_SRE(mode: AddressingMode): Instruction {
-        let address = undefined;
-        let addressGenerator = this.getAddressGenerator(mode);
-
-        for (address of addressGenerator) {
-            if (address == undefined) {
-                yield;
-            }
-        }
-
+    processInstruction_SRE(): boolean {
+        let address = this.currentInstructionAddress;
         let value = this.nes.read(address!);
 
-        yield;
+        if (this.currentInstructionCycle == 1)
+            return false;
+
         this.nes.write(address!, value); // Read, modify, write back
-        yield;
+        if (this.currentInstructionCycle == 2)
+            return false;
 
         const result = (value >> 1);
         this.nes.write(address!, result);
@@ -342,25 +378,20 @@ export class Cpu2A03 {
         this.toggleFlag(this.FLAG_CARRY, (value & 1) != 0);
         this.toggleFlag(this.FLAG_ZERO, this.register_A == 0);
         this.toggleFlag(this.FLAG_NEGATIVE, (this.register_A & (1 << 7)) != 0);
+        return true;
     }
 
     // RLA - Rotate Left and Logical AND
-    * processInstruction_RLA(mode: AddressingMode): Instruction {
-        let value = undefined;
-        let address = undefined;
-        let addressGenerator = this.getAddressGenerator(mode);
+    processInstruction_RLA(): boolean {
+        let address = this.currentInstructionAddress;
+        const value = this.nes.read(address!);
+        if (this.currentInstructionCycle == 1)
+            return false;
 
-        for (address of addressGenerator) {
-            if (address == undefined) {
-                yield;
-            }
-        }
-
-        value = this.nes.read(address!);
-        yield;
         const newValue = ((value << 1) | ((this.status_flags & this.FLAG_CARRY) != 0 ? 1 : 0)) & 0xFF;
         this.nes.write(address!, newValue);
-        yield;
+        if (this.currentInstructionCycle == 2)
+            return false;
 
         const result = this.register_A & newValue;
         this.register_A = result & 0xFF;
@@ -368,25 +399,20 @@ export class Cpu2A03 {
         this.toggleFlag(this.FLAG_CARRY, (value & (1 << 7)) != 0);
         this.toggleFlag(this.FLAG_ZERO, this.register_A == 0);
         this.toggleFlag(this.FLAG_NEGATIVE, (this.register_A & (1 << 7)) != 0);
+        return true;
     }
 
     // SLO - Shift Left and Logical OR
-    * processInstruction_SLO(mode: AddressingMode): Instruction {
-        let value = undefined;
-        let address = undefined;
-        let addressGenerator = this.getAddressGenerator(mode);
+    processInstruction_SLO(): boolean {
+        let address = this.currentInstructionAddress;
+        const value = this.nes.read(address!);
+        if (this.currentInstructionCycle == 1)
+            return false;
 
-        for (address of addressGenerator) {
-            if (address == undefined) {
-                yield;
-            }
-        }
-
-        value = this.nes.read(address!);
-        yield;
         const newValue = (value << 1) & 0xFF;
         this.nes.write(address!, newValue);
-        yield;
+        if (this.currentInstructionCycle == 2)
+            return false;
 
         const result = this.register_A | newValue;
         this.register_A = result & 0xFF;
@@ -394,26 +420,21 @@ export class Cpu2A03 {
         this.toggleFlag(this.FLAG_CARRY, (value & (1 << 7)) != 0);
         this.toggleFlag(this.FLAG_ZERO, this.register_A == 0);
         this.toggleFlag(this.FLAG_NEGATIVE, (this.register_A & (1 << 7)) != 0);
+        return true;
     }
 
-
     // ISB - Increment Memory and Subtract
-    * processInstruction_ISB(mode: AddressingMode): Instruction {
-        let address = undefined;
-        let addressGenerator = this.getAddressGenerator(mode);
+    processInstruction_ISB(): boolean {
+        if (this.currentInstructionCycle <= 2)
+            return false;
 
-        for (address of addressGenerator) {
-            if (address == undefined) {
-                yield;
-            }
-        }
+        let address = this.currentInstructionAddress;
 
         let value = this.nes.read(address!);
-        yield;
+
         value++;
         value = value & 0xFF;
         this.nes.write(address!, value);
-        yield;
 
         var result = this.register_A + ~value + (this.status_flags & this.FLAG_CARRY ? 1 : 0);
 
@@ -423,88 +444,63 @@ export class Cpu2A03 {
         this.toggleFlag(this.FLAG_NEGATIVE, (result & (1 << 7)) != 0);
 
         this.register_A = result & 0xFF;
+        return true;
     }
 
-
     // DCP - Decrement Memory and Compare
-    * processInstruction_DCP(mode: AddressingMode): Instruction {
-        let address = undefined;
-        let addressGenerator = this.getAddressGenerator(mode);
+    processInstruction_DCP(): boolean {
+        if (this.currentInstructionCycle <= 2)
+            return false;
 
-        for (address of addressGenerator) {
-            if (address == undefined) {
-                yield;
-            }
-        }
-
+        let address = this.currentInstructionAddress;
         let value = this.nes.read(address!);
-        yield;
+
         value--;
         value = value & 0xFF;
         this.nes.write(address!, value);
-        yield;
 
         const aValue = this.register_A - value;
 
         this.toggleFlag(this.FLAG_CARRY, ~aValue < 0);
         this.toggleFlag(this.FLAG_ZERO, aValue == 0);
         this.toggleFlag(this.FLAG_NEGATIVE, (aValue & (1 << 7)) != 0);
+        return true;
     }
 
-
     // SAX - Store Accumulator and Index X
-    * processInstruction_SAX(mode: AddressingMode): Instruction {
-        let address = undefined;
-        let addressGenerator = this.getAddressGenerator(mode);
+    processInstruction_SAX(): boolean {
+        if (this.currentInstructionCycle == 0)
+            return false;
 
-        for (address of addressGenerator) {
-            if (address == undefined) {
-                yield;
-            }
-        }
+        let address = this.currentInstructionAddress;
 
         const value = (this.register_A & this.register_X) & 0xFF;
         this.nes.write(address!, value);
+        return true;
     }
 
     // LAX - Load Accumulator and Index X
-    * processInstruction_LAX(mode: AddressingMode): Instruction {
-        let value!: number;
-        for (const v of this.readValue(mode)) {
-            if (v == undefined) {
-                yield;
-                continue;
-            }
-            value = v;
-        }
+    processInstruction_LAX(): boolean {
+        if (this.currentInstructionCycle == 0)
+            return false;
+
+        let value = this.nes.read(this.currentInstructionAddress!);
 
         this.toggleFlag(this.FLAG_ZERO, value == 0);
         this.toggleFlag(this.FLAG_NEGATIVE, (value & (1 << 7)) != 0);
 
         this.register_A = value;
         this.register_X = value;
+        return true;
     }
 
     // ROL - Rotate Left
-    * processInstruction_ROL(mode: AddressingMode): Instruction {
-        let address = undefined;
-        let addressGenerator = this.getAddressGenerator(mode);
+    processInstruction_ROL(): boolean {
+        if (this.currentInstructionCycle <= 2)
+            return false;
 
-        for (address of addressGenerator) {
-            if (address == undefined) {
-                yield;
-            }
-        }
-
+        let address = this.currentInstructionAddress;
         let value = this.nes.read(address!);
-
-        if (mode != AddressingMode.Accumulator)
-            yield;
-
-        this.nes.write(address!, value); // Read, modify, write back
-
-        if (mode != AddressingMode.Accumulator)
-            yield;
 
         const result = ((value << 1) | ((this.status_flags & this.FLAG_CARRY) != 0 ? 1 : 0)) & 0xFF;
         this.nes.write(address!, result);
@@ -512,28 +508,16 @@ export class Cpu2A03 {
         this.toggleFlag(this.FLAG_CARRY, (value & (1 << 7)) != 0);
         this.toggleFlag(this.FLAG_ZERO, result == 0);
         this.toggleFlag(this.FLAG_NEGATIVE, (result & (1 << 7)) != 0);
+        return true;
     }
 
     // ROR - Rotate Right
-    * processInstruction_ROR(mode: AddressingMode): Instruction {
-        let address = undefined;
-        let addressGenerator = this.getAddressGenerator(mode);
+    processInstruction_ROR(): boolean {
+        if (this.currentInstructionCycle <= 2)
+            return false;
 
-        for (address of addressGenerator) {
-            if (address == undefined) {
-                yield;
-            }
-        }
-
+        let address = this.currentInstructionAddress;
         let value = this.nes.read(address!);
-
-        if (mode != AddressingMode.Accumulator)
-            yield;
-
-        this.nes.write(address!, value); // Read, modify, write back
-
-        if (mode != AddressingMode.Accumulator)
-            yield;
 
         const result = (value >> 1) | ((this.status_flags & this.FLAG_CARRY) != 0 ? 1 << 7 : 0);
         this.nes.write(address!, result);
@@ -541,29 +525,16 @@ export class Cpu2A03 {
         this.toggleFlag(this.FLAG_CARRY, (value & 1) != 0);
         this.toggleFlag(this.FLAG_ZERO, result == 0);
         this.toggleFlag(this.FLAG_NEGATIVE, (result & (1 << 7)) != 0);
+        return true;
     }
 
-
     // LSR - Logical Shift Right
-    * processInstruction_LSR(mode: AddressingMode): Instruction {
-        let address = undefined;
-        let addressGenerator = this.getAddressGenerator(mode);
+    processInstruction_LSR(): boolean {
+        if (this.currentInstructionCycle <= 2)
+            return false;
 
-        for (address of addressGenerator) {
-            if (address == undefined) {
-                yield;
-            }
-        }
-
+        let address = this.currentInstructionAddress;
         let value = this.nes.read(address!);
-
-        if (mode != AddressingMode.Accumulator)
-            yield;
-
-        this.nes.write(address!, value); // Read, modify, write back
-
-        if (mode != AddressingMode.Accumulator)
-            yield;
 
         const result = (value >> 1);
         this.nes.write(address!, result);
@@ -571,658 +542,574 @@ export class Cpu2A03 {
         this.toggleFlag(this.FLAG_CARRY, (value & 1) != 0);
         this.toggleFlag(this.FLAG_ZERO, result == 0);
         this.toggleFlag(this.FLAG_NEGATIVE, (result & (1 << 7)) != 0);
+        return true;
     }
-
-
     // TAX - Transfer Accumulator to Index X
-    * processInstruction_TAX(): Instruction {
+    processInstruction_TAX(): boolean {
         this.register_X = this.register_A;
         this.toggleFlag(this.FLAG_ZERO, this.register_X == 0);
         this.toggleFlag(this.FLAG_NEGATIVE, (this.register_X & (1 << 7)) != 0);
+        return true;
     }
 
     // TAY - Transfer Accumulator to Index Y
-    * processInstruction_TAY(): Instruction {
+    processInstruction_TAY(): boolean {
         this.register_Y = this.register_A;
         this.toggleFlag(this.FLAG_ZERO, this.register_Y == 0);
         this.toggleFlag(this.FLAG_NEGATIVE, (this.register_Y & (1 << 7)) != 0);
+        return true;
     }
 
     // TXA - Transfer Index X to Accumulator
-    * processInstruction_TXA(): Instruction {
+    processInstruction_TXA(): boolean {
         this.register_A = this.register_X;
         this.toggleFlag(this.FLAG_ZERO, this.register_A == 0);
         this.toggleFlag(this.FLAG_NEGATIVE, (this.register_A & (1 << 7)) != 0);
+        return true;
     }
 
     // TYA - Transfer Index Y to Accumulator
-    * processInstruction_TYA(): Instruction {
+    processInstruction_TYA(): boolean {
         this.register_A = this.register_Y;
         this.toggleFlag(this.FLAG_ZERO, this.register_A == 0);
         this.toggleFlag(this.FLAG_NEGATIVE, (this.register_A & (1 << 7)) != 0);
+        return true;
     }
 
     // TSX - Transfer Stack Pointer to Index X
-    * processInstruction_TSX(): Instruction {
+    processInstruction_TSX(): boolean {
         this.register_X = this.register_SP;
         this.toggleFlag(this.FLAG_ZERO, this.register_X == 0);
         this.toggleFlag(this.FLAG_NEGATIVE, (this.register_X & (1 << 7)) != 0);
+        return true;
     }
 
     // TXS - Transfer Index X to Stack Pointer
-    * processInstruction_TXS(): Instruction {
+    processInstruction_TXS(): boolean {
         this.register_SP = this.register_X;
+        return true;
     }
 
-
     // DEC - Decrement Memory
-    * processInstruction_DEC(mode: AddressingMode): Instruction {
-        let address = undefined;
-        let addressGenerator = this.getAddressGenerator(mode);
-
-        for (address of addressGenerator) {
-            if (address == undefined) {
-                yield;
-            }
+    processInstruction_DEC(): boolean {
+        if (this.currentInstructionCycle <= 2) {
+            return false;
         }
 
-        let value = this.nes.read(address!);
-        yield;
-        this.nes.write(address!, value); // Read, modify, write back
-        yield;
+        let value = this.loadValue();
+        if (this.currentInstructionCycle == 3) {
+            return false;
+        }
+
+        this.nes.write(this.currentInstructionAddress!, value); // Read, modify, write back
+        if (this.currentInstructionCycle == 4) {
+            return false;
+        }
+
         value = (value - 1) & 0xFF;
-        this.nes.write(address!, value);
+        this.nes.write(this.currentInstructionAddress!, value);
 
         this.toggleFlag(this.FLAG_ZERO, value == 0);
         this.toggleFlag(this.FLAG_NEGATIVE, (value & (1 << 7)) != 0);
+        return true;
     }
 
     // INX - Increment X Register
-    * processInstruction_DEX(): Instruction {
+    processInstruction_DEX(): boolean {
         this.register_X = (this.register_X - 1) & 0xFF;
 
         this.toggleFlag(this.FLAG_ZERO, this.register_X == 0);
         this.toggleFlag(this.FLAG_NEGATIVE, (this.register_X & (1 << 7)) != 0);
+        return true;
     }
 
     // INY - Increment Y Register
-    * processInstruction_DEY(): Instruction {
+    processInstruction_DEY(): boolean {
         this.register_Y = (this.register_Y - 1) & 0xFF;
 
         this.toggleFlag(this.FLAG_ZERO, this.register_Y == 0);
         this.toggleFlag(this.FLAG_NEGATIVE, (this.register_Y & (1 << 7)) != 0);
+        return true;
     }
 
     // INC - Increment Memory
-    * processInstruction_INC(mode: AddressingMode): Instruction {
-        let address = undefined;
-        let addressGenerator = this.getAddressGenerator(mode);
-
-        for (address of addressGenerator) {
-            if (address == undefined) {
-                yield;
-            }
+    processInstruction_INC(): boolean {
+        if (this.currentInstructionCycle <= 2) {
+            return false;
         }
 
-        let value = this.nes.read(address!);
-        yield;
-        this.nes.write(address!, value); // Read, modify, write back
-        yield;
+        let value = this.nes.read(this.currentInstructionAddress!);
+        if (this.currentInstructionCycle == 3) {
+            return false;
+        }
+
+        this.nes.write(this.currentInstructionAddress!, value); // Read, modify, write back
+        if (this.currentInstructionCycle == 4) {
+            return false;
+        }
+
         value = (value + 1) & 0xFF;
-        this.nes.write(address!, value);
+        this.nes.write(this.currentInstructionAddress!, value);
 
         this.toggleFlag(this.FLAG_ZERO, value == 0);
         this.toggleFlag(this.FLAG_NEGATIVE, (value & (1 << 7)) != 0);
+        return true;
     }
 
     // INX - Increment X Register
-    * processInstruction_INX(): Instruction {
+    processInstruction_INX(): boolean {
         this.register_X = (this.register_X + 1) & 0xFF;
 
         this.toggleFlag(this.FLAG_ZERO, this.register_X == 0);
         this.toggleFlag(this.FLAG_NEGATIVE, (this.register_X & (1 << 7)) != 0);
+        return true;
     }
 
     // INY - Increment Y Register
-    * processInstruction_INY(): Instruction {
+    processInstruction_INY(): boolean {
         this.register_Y = (this.register_Y + 1) & 0xFF;
 
         this.toggleFlag(this.FLAG_ZERO, this.register_Y == 0);
         this.toggleFlag(this.FLAG_NEGATIVE, (this.register_Y & (1 << 7)) != 0);
+        return true;
     }
 
 
     // PHP - Push Processor Status
-    * processInstruction_PHP(): Instruction {
+    processInstruction_PHP(): boolean {
+        if (this.currentInstructionCycle == 0) {
+            return false;
+        }
+
         const flagsBytes = this.status_flags | this.FLAG_UNUSED | this.FLAG_BREAK;
         this.pushStack(flagsBytes);
-        yield;
+        return true;
     }
 
     // PLP - Pull Processor Status
-    * processInstruction_PLP(): Instruction {
+    processInstruction_PLP(): boolean {
+        if (this.currentInstructionCycle <= 1) {
+            return false;
+        }
+
         const newFlags = this.popStack();
-        yield;
+
         this.toggleFlag(this.FLAG_CARRY, (newFlags & this.FLAG_CARRY) != 0);
         this.toggleFlag(this.FLAG_ZERO, (newFlags & this.FLAG_ZERO) != 0);
         this.toggleFlag(this.FLAG_DECIMAL, (newFlags & this.FLAG_DECIMAL) != 0);
         this.toggleFlag(this.FLAG_OVERFLOW, (newFlags & this.FLAG_OVERFLOW) != 0);
         this.toggleFlag(this.FLAG_NEGATIVE, (newFlags & this.FLAG_NEGATIVE) != 0);
-        yield;
-
         this.pendingInterruptDisableFlag = (newFlags & this.FLAG_INTERRUPT) != 0;
+
+        return true;
     }
 
     // PHA - Push Accumulator
-    * processInstruction_PHA(): Instruction {
+    processInstruction_PHA(): boolean {
+        if (this.currentInstructionCycle == 0) {
+            return false;
+        }
+
         this.pushStack(this.register_A);
-        yield;
+        return true;
     }
 
     // PLA - Pull Accumulator
-    * processInstruction_PLA(): Instruction {
-        this.register_A = this.popStack();
+    processInstruction_PLA(): boolean {
+        if (this.currentInstructionCycle <= 1) {
+            return false;
+        }
 
+        this.register_A = this.popStack();
         this.toggleFlag(this.FLAG_ZERO, this.register_A == 0);
         this.toggleFlag(this.FLAG_NEGATIVE, (this.register_A & (1 << 7)) != 0);
-        yield;
-        yield;
+
+        return true;
     }
 
 
     // BCC - Branch if Carry Clear
-    * processInstruction_BCC(mode: AddressingMode): Instruction {
+    processInstruction_BCC(): boolean {
         if (!(this.status_flags & this.FLAG_CARRY)) {
-            yield* this.doJump(mode);
+            if (this.currentInstructionCycle == 0) {
+                return false;
+            }
+            this.register_PC = this.currentInstructionAddress!;
         }
-        else {
-            this.advancePC();
-        }
+
+        return true;
     }
 
     // BCS - Branch if Carry Set
-    * processInstruction_BCS(mode: AddressingMode): Instruction {
+    processInstruction_BCS(): boolean {
         if (this.status_flags & this.FLAG_CARRY) {
-            yield* this.doJump(mode);
+            if (this.currentInstructionCycle == 0) {
+                return false;
+            }
+            this.register_PC = this.currentInstructionAddress!;
         }
-        else {
-            this.advancePC();
-        }
+
+        return true;
     }
 
     // BEQ - Branch if Equal
-    * processInstruction_BEQ(mode: AddressingMode): Instruction {
+    processInstruction_BEQ(): boolean {
         if (this.status_flags & this.FLAG_ZERO) {
-            yield* this.doJump(mode);
+            if (this.currentInstructionCycle == 0) {
+                return false;
+            }
+            this.register_PC = this.currentInstructionAddress!;
         }
-        else {
-            this.advancePC();
-        }
+
+        return true;
     }
 
     // BNE - Branch if Not Equal
-    * processInstruction_BNE(mode: AddressingMode): Instruction {
+    processInstruction_BNE(): boolean {
         if (!(this.status_flags & this.FLAG_ZERO)) {
-            yield* this.doJump(mode);
+            if (this.currentInstructionCycle == 0) {
+                return false;
+            }
+            this.register_PC = this.currentInstructionAddress!;
         }
-        else {
-            this.advancePC();
-        }
+
+        return true;
     }
 
     // BPL - Branch if Positive
-    * processInstruction_BPL(mode: AddressingMode): Instruction {
+    processInstruction_BPL(): boolean {
         if (!(this.status_flags & this.FLAG_NEGATIVE)) {
-            yield* this.doJump(mode);
+            if (this.currentInstructionCycle == 0) {
+                return false;
+            }
+            this.register_PC = this.currentInstructionAddress!;
         }
-        else {
-            this.advancePC();
-        }
+
+        return true;
     }
 
     // BMI - Branch if Negative
-    * processInstruction_BMI(mode: AddressingMode): Instruction {
+    processInstruction_BMI(): boolean {
         if (this.status_flags & this.FLAG_NEGATIVE) {
-            yield* this.doJump(mode);
+            if (this.currentInstructionCycle == 0) {
+                return false;
+            }
+            this.register_PC = this.currentInstructionAddress!;
         }
-        else {
-            this.advancePC();
-        }
+
+        return true;
     }
 
     // BVC - Branch if Overflow Clear
-    * processInstruction_BVC(mode: AddressingMode): Instruction {
+    processInstruction_BVC(): boolean {
         if (!(this.status_flags & this.FLAG_OVERFLOW)) {
-            yield* this.doJump(mode);
+            if (this.currentInstructionCycle == 0) {
+                return false;
+            }
+            this.register_PC = this.currentInstructionAddress!;
         }
-        else {
-            this.advancePC();
-        }
+
+        return true;
     }
 
     // BVS - Branch if Overflow Set
-    * processInstruction_BVS(mode: AddressingMode): Instruction {
+    processInstruction_BVS(): boolean {
         if (this.status_flags & this.FLAG_OVERFLOW) {
-            yield* this.doJump(mode);
+            if (this.currentInstructionCycle == 0) {
+                return false;
+            }
+            this.register_PC = this.currentInstructionAddress!;
         }
-        else {
-            this.advancePC();
-        }
+
+        return true;
     }
 
     // CMP - Compare
-    * processInstruction_CMP(mode: AddressingMode): Instruction {
-        let value!: number;
-        for (const v of this.readValue(mode)) {
-            if (v == undefined) {
-                yield;
-                continue;
-            }
-
-            value = v;
+    processInstruction_CMP(): boolean {
+        if (this.currentInstructionCycle == 0) {
+            return false;
         }
 
+        const value = this.loadValue();
         const result = (this.register_A - value) & 0xFF;
 
         this.toggleFlag(this.FLAG_CARRY, this.register_A >= value);
         this.toggleFlag(this.FLAG_ZERO, this.register_A == value);
         this.toggleFlag(this.FLAG_NEGATIVE, (result & (1 << 7)) != 0);
+        return true;
     }
 
     // CPX - Compare X Register
-    * processInstruction_CPX(mode: AddressingMode): Instruction {
-        let value!: number;
-        for (const v of this.readValue(mode)) {
-            if (v == undefined) {
-                yield;
-                continue;
-            }
-
-            value = v;
+    processInstruction_CPX(): boolean {
+        if (this.currentInstructionCycle == 0) {
+            return false;
         }
 
+        const value = this.loadValue();
         const result = this.register_X - value;
 
         this.toggleFlag(this.FLAG_CARRY, this.register_X >= value);
         this.toggleFlag(this.FLAG_ZERO, this.register_X == value);
         this.toggleFlag(this.FLAG_NEGATIVE, (result & (1 << 7)) != 0);
+        return true;
     }
 
     // CPY - Compare Y Register
-    * processInstruction_CPY(mode: AddressingMode): Instruction {
-        let value!: number;
-        for (const v of this.readValue(mode)) {
-            if (v == undefined) {
-                yield;
-                continue;
-            }
-
-            value = v;
+    processInstruction_CPY(): boolean {
+        if (this.currentInstructionCycle == 0) {
+            return false;
         }
 
+        const value = this.loadValue();
         const result = this.register_Y - value;
 
         this.toggleFlag(this.FLAG_CARRY, this.register_Y >= value);
         this.toggleFlag(this.FLAG_ZERO, this.register_Y == value);
         this.toggleFlag(this.FLAG_NEGATIVE, (result & (1 << 7)) != 0);
-    }
-
-
-    private * doJump(mode: AddressingMode) {
-        yield;
-        let address = undefined;
-        let addressGenerator = this.getAddressGenerator(mode);
-
-        for (address of addressGenerator) {
-            if (address == undefined) {
-                yield;
-            }
-        }
-
-        this.register_PC = address!;
+        return true;
     }
 
     // SEC - Set Carry Flag
-    * processInstruction_SEC(): Instruction {
+    processInstruction_SEC(): boolean {
         this.toggleFlag(this.FLAG_CARRY, true);
+        return true;
     }
 
     // CLC - Clear Carry Flag
-    * processInstruction_CLC(): Instruction {
+    processInstruction_CLC(): boolean {
         this.toggleFlag(this.FLAG_CARRY, false);
+        return true;
     }
 
     // CLD - Clear Decimal Flag
-    * processInstruction_CLD(): Instruction {
+    processInstruction_CLD(): boolean {
         this.toggleFlag(this.FLAG_DECIMAL, false);
+        return true;
     }
 
     // CLI - Clear Interrupt Disable
-    * processInstruction_CLI(): Instruction {
+    processInstruction_CLI(): boolean {
         this.toggleFlag(this.FLAG_INTERRUPT, false);
+        return true;
     }
 
     // SEI - Set Interrupt Disable
-    * processInstruction_SEI(): Instruction {
+    processInstruction_SEI(): boolean {
         this.pendingInterruptDisableFlag = true;
+        return true;
     }
 
     // CLV - Clear Overflow Flag
-    * processInstruction_CLV(): Instruction {
+    processInstruction_CLV(): boolean {
         this.toggleFlag(this.FLAG_OVERFLOW, false);
+        return true;
     }
 
     // SED - Set Decimal Flag
-    * processInstruction_SED(): Instruction {
+    processInstruction_SED(): boolean {
         this.toggleFlag(this.FLAG_DECIMAL, true);
+        return true;
     }
 
 
     // NOP - No Operation
-    * processInstruction_NOP(extraCycles: number, extraReads: number): Instruction {
-        for (let i = 0; i < extraReads; i++) {
-            this.advancePC();
-        }
+    processInstruction_NOP(extraCycles: number, extraReads: number): boolean {
 
-        for (let i = 0; i < extraCycles; i++) {
-            yield;
-        }
-    }
-
-    * processInstruction_NOP_ReadAddress(mode: AddressingMode): Instruction {
-        let addressGenerator = this.getAddressGenerator(mode);
-
-        for (const address of addressGenerator) {
-            if (address == undefined) {
-                yield;
+        if (this.currentInstructionCycle == 0) {
+            for (let i = 0; i < extraReads; i++) {
+                this.advancePC();
             }
         }
+
+        if (this.currentInstructionCycle < extraCycles)
+            return false;
+
+        return true;
+    }
+
+    processInstruction_NOP_ReadAddress(): boolean {
+        if (this.currentInstructionCycle == 0)
+            return false;
+
+        return true;
     }
 
     // STX - Store X Register
-    * processInstruction_STX(mode: AddressingMode): Instruction {
-        let address = undefined;
-        let addressGenerator = this.getAddressGenerator(mode);
+    processInstruction_STX(): boolean {
 
-        for (address of addressGenerator) {
-            if (address == undefined) {
-                yield;
-            }
+        if (this.nes.isNormalAddress(this.currentInstructionAddress!)) {
+            this.instructionResult.target_address_memory = this.nes.read(this.currentInstructionAddress!);
         }
 
-        if (this.nes.isNormalAddress(address!)) {
-            this.instructionResult.target_address_memory = this.nes.read(address!);
-        }
-
-        this.nes.write(address!, this.register_X);
+        this.nes.write(this.currentInstructionAddress!, this.register_X);
+        return true;
     }
 
     // STY - Store Y Register
-    * processInstruction_STY(mode: AddressingMode): Instruction {
-        let address = undefined;
-        let addressGenerator = this.getAddressGenerator(mode);
-
-        for (address of addressGenerator) {
-            if (address == undefined) {
-                yield;
-            }
+    processInstruction_STY(): boolean {
+        if (this.nes.isNormalAddress(this.currentInstructionAddress!)) {
+            this.instructionResult.target_address_memory = this.nes.read(this.currentInstructionAddress!);
         }
-
-        if (this.nes.isNormalAddress(address!)) {
-            this.instructionResult.target_address_memory = this.nes.read(address!);
-        }
-        this.nes.write(address!, this.register_Y);
+        this.nes.write(this.currentInstructionAddress!, this.register_Y);
+        return true;
     }
 
     // STA - Store Accumulator
-    * processInstruction_STA(mode: AddressingMode): Instruction {
-        let address = undefined;
-        let addressGenerator = this.getAddressGenerator(mode);
-
-        for (address of addressGenerator) {
-            if (address == undefined) {
-                yield;
-            }
+    processInstruction_STA(): boolean {
+        if (this.nes.isNormalAddress(this.currentInstructionAddress!)) {
+            this.instructionResult.target_address_memory = this.nes.read(this.currentInstructionAddress!);
         }
-
-        if (this.nes.isNormalAddress(address!)) {
-            this.instructionResult.target_address_memory = this.nes.read(address!);
-        }
-        this.nes.write(address!, this.register_A);
+        this.nes.write(this.currentInstructionAddress!, this.register_A);
+        return true;
     }
 
     // LDX - Load X Register
-    * processInstruction_LDX(mode: AddressingMode): Instruction {
-        let value!: number;
-        for (const v of this.readValue(mode)) {
-            if (v == undefined) {
-                yield;
-                continue;
-            }
-            value = v;
-        }
+    processInstruction_LDX(): boolean {
+        const value = this.loadValue();
 
         this.toggleFlag(this.FLAG_ZERO, value == 0);
         this.toggleFlag(this.FLAG_NEGATIVE, (value & (1 << 7)) != 0);
 
         this.register_X = value;
-
-        if (mode == AddressingMode.IndirectX || mode == AddressingMode.IndirectY) {
-            this.instructionResult.target_address_memory = value;
-        }
+        return true;
     }
 
     // LDY - Load Y Register
-    * processInstruction_LDY(mode: AddressingMode): Instruction {
-        let value!: number;
-        for (const v of this.readValue(mode)) {
-            if (v == undefined) {
-                yield;
-                continue;
-            }
-            value = v;
-        }
+    processInstruction_LDY(): boolean {
+        const value = this.loadValue();
 
         this.toggleFlag(this.FLAG_ZERO, value == 0);
         this.toggleFlag(this.FLAG_NEGATIVE, (value & (1 << 7)) != 0);
 
         this.register_Y = value;
-        if (mode == AddressingMode.IndirectX || mode == AddressingMode.IndirectY) {
-            this.instructionResult.target_address_memory = value;
-        }
+
+        return true;
     }
 
     // LDA - Load Accumulator
-    * processInstruction_LDA(mode: AddressingMode): Instruction {
-        let value!: number;
-        for (const v of this.readValue(mode)) {
-            if (v == undefined) {
-                yield;
-                continue;
-            }
-            value = v;
-        }
+    processInstruction_LDA(): boolean {
+        const value = this.loadValue();
 
         this.toggleFlag(this.FLAG_ZERO, value == 0);
         this.toggleFlag(this.FLAG_NEGATIVE, (value & (1 << 7)) != 0);
 
         this.register_A = value;
-        if (mode == AddressingMode.IndirectX || mode == AddressingMode.IndirectY) {
-            this.instructionResult.target_address_memory = value;
-        }
-    }
 
+        return true;
+    }
 
     // JMP - Jump
-    * processInstruction_JMP(mode: AddressingMode): Instruction {
-        let address = undefined;
-        let addressGenerator = this.getAddressGenerator(mode);
-
-        for (address of addressGenerator) {
-            if (address == undefined) {
-                yield;
-            }
-        }
-
-        this.register_PC = address!;
+    processInstruction_JMP(): boolean {
+        this.register_PC = this.currentInstructionAddress!;
+        return true;
     }
 
-    subCt: number = 0;
 
     // JSR - Jump to Subroutine
-    * processInstruction_JSR(mode: AddressingMode): Instruction {
-        this.pushStack16(this.register_PC + 1);
-        //console.log(`JSR ${numberToHex(this.register_PC + 1)}`);
-        yield* this.noop_loop(3);
+    processInstruction_JSR(): boolean {
+        if (this.currentInstructionCycle <= 3)
+            return false;
 
-        let address = undefined;
-        let addressGenerator = this.getAddressGenerator(mode);
-
-        for (address of addressGenerator) {
-            if (address == undefined) {
-                yield;
-            }
-        }
-
-        this.register_PC = address!;
-        this.subCt++;
+        this.pushStack16(this.register_PC - 1);
+        this.register_PC = this.currentInstructionAddress!;
+        return true;
     }
 
     // RTS - Return from Subroutine
-    * processInstruction_RTS(): Instruction {
+    processInstruction_RTS(): boolean {
+        if (this.currentInstructionCycle <= 4)
+            return false;
+
         this.register_PC = this.popStack16() + 1;
-        //console.log(`RTS ${numberToHex(this.register_PC)}`);
-        yield* this.noop_loop(4);
+        return true;
     }
 
     // RTI - Return from Interrupt
-    * processInstruction_RTI(): Instruction {
+    processInstruction_RTI(): boolean {
+        if (this.currentInstructionCycle <= 4)
+            return false;
+
         this.status_flags = this.popStack();
         this.register_PC = this.popStack16();
-        //console.log(`RTI ${numberToHex(oldPc)} ${numberToHex(this.register_PC)} ${numberToHex(this.status_flags)}`);
-        yield* this.noop_loop(4);
 
         if (this.nes.breakOnRti) {
             this.nes.togglePause();
         }
+        return true;
     }
 
     // ASL - Arithmetic Shift Left
-    * processInstruction_ASL(mode: AddressingMode): Instruction {
-        let value = undefined;
-        let address = undefined;
-        let addressGenerator = this.getAddressGenerator(mode);
+    processInstruction_ASL(): boolean {
+        if (this.currentInstructionCycle <= 2)
+            return false;
 
-        for (address of addressGenerator) {
-            if (address == undefined) {
-                yield;
-            }
-        }
-
-        value = this.nes.read(address!);
-
-        if (mode != AddressingMode.Accumulator)
-            yield;
-
+        const value = this.loadValue();
         const newValue = (value << 1) & 0xFF;
 
         this.toggleFlag(this.FLAG_CARRY, (value & (1 << 7)) != 0);
         this.toggleFlag(this.FLAG_ZERO, newValue == 0);
         this.toggleFlag(this.FLAG_NEGATIVE, (newValue & (1 << 7)) != 0);
 
-        this.nes.write(address!, newValue);
-
-        if (mode != AddressingMode.Accumulator)
-            yield;
+        this.nes.write(this.currentInstructionAddress!, newValue);
+        return true;
     }
 
     // AND - Logical AND
-    * processInstruction_AND(mode: AddressingMode): Instruction {
-        let value!: number;
-        for (const v of this.readValue(mode)) {
-            if (v == undefined) {
-                yield;
-                continue;
-            }
-            value = v;
-        }
+    processInstruction_AND(): boolean {
+        if (this.currentInstructionCycle == 0)
+            return false;
 
+        const value = this.loadValue();
         this.register_A = this.register_A & value;
 
         this.toggleFlag(this.FLAG_ZERO, this.register_A == 0);
         this.toggleFlag(this.FLAG_NEGATIVE, (this.register_A & (1 << 7)) != 0);
+        return true;
     }
 
     // BIT - Test Bits
-    * processInstruction_BIT(mode: AddressingMode): Instruction {
+    processInstruction_BIT(): boolean {
+        if (this.currentInstructionCycle == 0)
+            return false;
 
-        let address = undefined;
-        let addressGenerator = this.getAddressGenerator(mode);
-
-        for (address of addressGenerator) {
-            if (address == undefined) {
-                yield;
-            }
-        }
-
-        let value = this.nes.read(address!);
-
-
+        const value = this.loadValue();
         const result = this.register_A & value;
 
         this.toggleFlag(this.FLAG_ZERO, result == 0);
         this.toggleFlag(this.FLAG_OVERFLOW, (value & (1 << 6)) != 0);
         this.toggleFlag(this.FLAG_NEGATIVE, (value & (1 << 7)) != 0);
 
-        if (this.nes.isNormalAddress(address!)) {
-            this.instructionResult.target_address_memory = this.nes.read(address!);
+        if (this.nes.isNormalAddress(this.currentInstructionAddress!)) {
+            this.instructionResult.target_address_memory = this.nes.read(this.currentInstructionAddress!);
         }
+        return true;
     }
 
     // ORA - Logical OR
-    * processInstruction_ORA(mode: AddressingMode): Instruction {
-        let value!: number;
-        for (const v of this.readValue(mode)) {
-            if (v == undefined) {
-                yield;
-                continue;
-            }
-            value = v;
-        }
+    processInstruction_ORA(): boolean {
+        const value = this.loadValue();
 
         this.register_A = this.register_A | value;
 
         this.toggleFlag(this.FLAG_ZERO, this.register_A == 0);
         this.toggleFlag(this.FLAG_NEGATIVE, (this.register_A & (1 << 7)) != 0);
+        return true;
     }
 
     // EOR - Logical Exclusive OR
-    * processInstruction_EOR(mode: AddressingMode): Instruction {
-        let value!: number;
-        for (const v of this.readValue(mode)) {
-            if (v == undefined) {
-                yield;
-                continue;
-            }
-            value = v;
-        }
+    processInstruction_EOR(): boolean {
+        const value = this.loadValue();
 
         this.register_A = this.register_A ^ value;
 
         this.toggleFlag(this.FLAG_ZERO, this.register_A == 0);
         this.toggleFlag(this.FLAG_NEGATIVE, (this.register_A & (1 << 7)) != 0);
+        return true;
     }
 
     // ADC - Add with Carry
-    * processInstruction_ADC(mode: AddressingMode): Instruction {
-        let value!: number;
-        for (const v of this.readValue(mode)) {
-            if (v == undefined) {
-                yield;
-                continue;
-            }
-            value = v;
-        }
+    processInstruction_ADC(): boolean {
+        const value = this.loadValue();
 
         var result = this.register_A + value + (this.status_flags & this.FLAG_CARRY ? 1 : 0);
 
@@ -1232,19 +1119,12 @@ export class Cpu2A03 {
         this.toggleFlag(this.FLAG_NEGATIVE, (result & (1 << 7)) != 0);
 
         this.register_A = result & 0xFF;
+        return true;
     }
 
     // SBC - Subtract with Carry
-    * processInstruction_SBC(mode: AddressingMode): Instruction {
-        let value!: number;
-        for (const v of this.readValue(mode)) {
-            if (v == undefined) {
-                yield;
-                continue;
-            }
-            value = v;
-        }
-
+    processInstruction_SBC(): boolean {
+        let value: number = this.loadValue();
         var result = this.register_A + ~value + (this.status_flags & this.FLAG_CARRY ? 1 : 0);
 
         this.toggleFlag(this.FLAG_CARRY, (~result < 0x00));
@@ -1253,259 +1133,341 @@ export class Cpu2A03 {
         this.toggleFlag(this.FLAG_NEGATIVE, (result & (1 << 7)) != 0);
 
         this.register_A = result & 0xFF;
+        return true;
     }
 
-    * readValue(mode: AddressingMode): Generator<number | undefined> {
-        let value = undefined;
-
-        switch (mode) {
-            case AddressingMode.Immediate:
-                value = this.nes.read(this.register_PC);
-                this.instructionResult.target_address = value;
-                this.advancePC();
-                break;
-            default:
-                let addressGenerator = this.getAddressGenerator(mode);
-                let address = undefined;
-
-                for (address of addressGenerator) {
-                    if (address == undefined) {
-                        yield undefined;
-                    }
-                }
-
-                if (address == undefined) {
-                    throw new Error(`Address is undefined for mode: ${AddressingMode[mode]} with instruction ${this.instructionResult.instructionMetadata?.name}`);
-                }
-
-                value = this.nes.read(address!);
-                break;
+    private loadValue(): number {
+        if (this.currentInstructionAddressingMode == AddressingMode.Immediate) {
+            const value = this.nes.read(this.register_PC);
+            this.instructionResult.target_address_memory = value;
+            this.advancePC();
+            return value;
         }
-
-        yield value;
+        else {
+            const value = this.nes.read(this.currentInstructionAddress!);
+            this.instructionResult.target_address_memory = value;
+            return value;
+        }
     }
 
 
-    private getAddressGenerator(mode: AddressingMode): Generator<number | undefined> {
-        let addressGenerator = undefined;
-
+    private getAddressFunction(mode: AddressingMode): AddressFunction {
+        let addressFunction = undefined;
 
         switch (mode) {
             case AddressingMode.ZeroPage:
-                addressGenerator = this.getZeroPageAddress();
+                addressFunction = this.getZeroPageAddress;
                 break;
             case AddressingMode.ZeroPageX:
-                addressGenerator = this.getZeroPageXAddress();
+                addressFunction = this.getZeroPageXAddress;
                 break;
             case AddressingMode.ZeroPageY:
-                addressGenerator = this.getZeroPageYAddress();
+                addressFunction = this.getZeroPageYAddress;
                 break;
             case AddressingMode.Absolute:
-                addressGenerator = this.getAbsoluteAddress();
+                addressFunction = this.getAbsoluteAddress;
                 break;
             case AddressingMode.AbsoluteX:
-                addressGenerator = this.getAbsoluteXAddress();
+                addressFunction = this.getAbsoluteXAddress;
                 break;
             case AddressingMode.AbsoluteY:
-                addressGenerator = this.getAbsoluteYAddress();
+                addressFunction = this.getAbsoluteYAddress;
                 break;
             case AddressingMode.IndirectX:
-                addressGenerator = this.getIndirectXAddress();
+                addressFunction = this.getIndirectXAddress;
                 break;
             case AddressingMode.IndirectY:
-                addressGenerator = this.getIndirectYAddress();
+                addressFunction = this.getIndirectYAddress;
                 break;
             case AddressingMode.Relative:
-                addressGenerator = this.getRelativeAddress();
+                addressFunction = this.getRelativeAddress;
                 break;
             case AddressingMode.Accumulator:
-                addressGenerator = this.getAccumulatorAddress();
+                addressFunction = this.getAccumulatorAddress;
                 break;
             case AddressingMode.Indirect:
-                addressGenerator = this.getIndirectAddress();
+                addressFunction = this.getIndirectAddress;
                 break;
             default:
                 throw new Error(`Unknown addressing mode: ${mode} with instruction ${this.instructionResult.instructionMetadata?.name}`);
         }
 
-        const instructionResult = this.instructionResult;
+        if (addressFunction == undefined) {
+            throw new Error(`Address function is undefined for mode: ${AddressingMode[mode]} with instruction ${this.instructionResult.instructionMetadata?.name}`);
+        }
 
-        let addressGeneratorWrapper = function* () {
-            let finalAddress = undefined;
-            for (const address of addressGenerator) {
-                finalAddress = address;
-                yield address;
-            }
-            instructionResult.target_address = finalAddress!;
-        }();
-
-        return addressGeneratorWrapper;
+        return addressFunction;
     }
 
-    * getAccumulatorAddress(): Generator<number | undefined> {
-        yield this.nes.CPU_BUSADDRESS_REGISTER_A;
+    ////////////
+    // Address Functions
+    ////////////
+
+    getAccumulatorAddress(): boolean {
+        this.currentInstructionAddress = this.nes.CPU_BUSADDRESS_REGISTER_A;
+        return true;
     }
 
-    * getRelativeAddress(): Generator<number | undefined> {
+    getRelativeAddress(): boolean {
+        if (this.currentInstructionCycle == 1)
+            return true; // Return from oops cycle
+
         const arg = this.nes.read(this.register_PC);
-        this.advancePC();
+        if (this.currentInstructionCycle == 0)
+            this.advancePC();
 
         let address = u8toSigned(arg);
         const final_address = this.register_PC + address;
+        this.currentInstructionAddress = final_address;
 
         const pc_low_byte = this.register_PC & 0xFF;
         if (pc_low_byte + address > 0xFF || pc_low_byte + address < 0) {
             // Oops cycle
-            yield undefined;
+            if (this.currentInstructionCycle == 0)
+                return false;
         }
 
-        yield final_address;
+        return true;
     }
 
-    * getIndirectYAddress(): Generator<number | undefined> {
+    getIndirectYAddress(): boolean {
         // Get the zero page address (arg) and store it in temp_register
-        const arg = this.nes.read(this.register_PC);
-        this.instructionResult.indirectOffsetBase = arg;
-        this.advancePC();
-        yield undefined;
-        // Get the value at the zero page address + Y to get the high byte
-        const lowByte = this.nes.read(arg);
-        let address = lowByte;
-        yield undefined;
-        // Get the value at the zero page address + Y to get the high byte
-        const highByte = this.nes.read((arg + 1) % 0x100);
-        address |= highByte << 8;
-        yield undefined;
+        if (this.currentInstructionCycle == 0) {
+            this.tempAddressArg = this.nes.read(this.register_PC);
+            this.instructionResult.indirectOffsetBase = this.tempAddressArg;
+            this.advancePC();
+            return false;
+        }
+        if (this.currentInstructionCycle == 1) {
+            // Get the value at the zero page address + Y to get the high byte
+            const lowByte = this.nes.read(this.tempAddressArg);
+            this.currentInstructionAddress = lowByte;
+            return false;
+        }
+
+        if (this.currentInstructionAddress == undefined)
+            throw new Error(`currentInstructionAddress should be set by now!`);
+
+        if (this.currentInstructionCycle == 2) {
+            // Get the value at the zero page address + Y to get the high byte
+            const highByte = this.nes.read((this.tempAddressArg + 1) % 0x100);
+            this.currentInstructionAddress |= highByte << 8;
+            return false;
+        }
+
+        const lowByte = this.currentInstructionAddress & 0xFF;
 
         if (this.isStoreInstruction() || lowByte + this.register_Y > 0xFF) {
             // Oops cycle
-            yield undefined;
+            if (this.currentInstructionCycle == 3)
+                return false;
         }
 
-        const finalAddress = (address + this.register_Y) % 0x10000;
+        const finalAddress = (this.currentInstructionAddress + this.register_Y) % 0x10000;
 
-        this.instructionResult.indirectOffset = arg + this.register_Y;
+        //this.instructionResult.indirectOffset = arg + this.register_Y;
 
         //console.log(`getIndirectYAddress (${numberToHex(arg)},Y) @ ${numberToHex(this.register_Y)} = ${numberToHex(finalAddress)} L:${numberToHex(lowByte)} H:${numberToHex(highByte)}`);
 
-        yield finalAddress;
-        //val =  PEEK(arg) + PEEK((arg + 1) % 256) * 256 + Y
+        this.currentInstructionAddress = finalAddress;
+        //val =  PEEK(arg) + PEEK((arg + 1) % 256) 256 + Y
+        return true;
     }
 
-    * getIndirectXAddress(): Generator<number | undefined> {
+    getIndirectXAddress(): boolean {
         // Get the zero page address (arg) and store it in temp_register
-        let arg = this.nes.read(this.register_PC);
-        this.instructionResult.indirectOffsetBase = arg;
-        this.advancePC();
-        yield undefined;
+        if (this.currentInstructionCycle == 0) {
+            this.tempAddressArg = this.nes.read(this.register_PC);
+            this.instructionResult.indirectOffsetBase = this.tempAddressArg;
+            this.advancePC();
+            return false;
+        }
         // Get the value at the zero page address + X to get the high byte
-        const zeroPageAddress = (arg + this.register_X) % 0x100;
-        let address = this.nes.read(zeroPageAddress);
-        yield undefined;
-        // Get the low byte
-        const zeroPageAddress2 = (arg + this.register_X + 1) % 0x100;
-        address |= this.nes.read(zeroPageAddress2) << 8;
-        yield undefined;
-        yield undefined;
+        if (this.currentInstructionCycle == 1) {
+            const zeroPageAddress = (this.tempAddressArg + this.register_X) % 0x100;
+            this.currentInstructionAddress = this.nes.read(zeroPageAddress);
+            return false;
+        }
+
+        if (this.currentInstructionAddress == undefined)
+            throw new Error(`currentInstructionAddress should be set by now! Cycle: ${this.currentInstructionCycle}`);
+
+        if (this.currentInstructionCycle == 2) {
+            // Get the low byte
+            const zeroPageAddress2 = (this.tempAddressArg + this.register_X + 1) % 0x100;
+            this.currentInstructionAddress |= this.nes.read(zeroPageAddress2) << 8;
+            return false;
+        }
+
+        if (this.currentInstructionCycle == 3)
+            return false;
         //console.log(`LDA (${numberToHex(arg)},X) @ ${numberToHex(this.register_X)} = ${numberToHex(address)} ZPA1: ${numberToHex(zeroPageAddress)} ZPA2: ${numberToHex(zeroPageAddress2)}`);
-        yield address;
-        //val = PEEK(  PEEK((arg + X) % 256) + PEEK( (arg + X + 1) % 256) * 256  )	
+        //val = PEEK(  PEEK((arg + X) % 256) + PEEK( (arg + X + 1) % 256) 256  )	
 
-        this.instructionResult.indirectOffset = arg + this.register_X;
+        //this.instructionResult.indirectOffset = arg + this.register_X;
+        return true;
     }
 
-    * getAbsoluteXAddress(): Generator<number | undefined> {
-        const lowByte = this.nes.read(this.register_PC);
-        this.advancePC();
-        yield undefined;
-        const highByte = this.nes.read(this.register_PC) << 8;
-        this.advancePC();
-        yield undefined;
-
-        const address = highByte | lowByte;
-
-        if (this.isStoreInstruction() || lowByte + this.register_X > 0xFF) {
-            // Oops cycle
-            yield undefined;
+    getAbsoluteXAddress(): boolean {
+        if (this.currentInstructionCycle == 0) {
+            const lowByte = this.nes.read(this.register_PC);
+            this.currentInstructionAddress = lowByte;
+            this.advancePC();
+            return false;
         }
 
-        yield (address + this.register_X) % 0x10000;
-    }
+        if (this.currentInstructionAddress == undefined)
+            throw new Error(`currentInstructionAddress should be set by now!`);
 
-    * getAbsoluteYAddress(): Generator<number | undefined> {
-        const lowByte = this.nes.read(this.register_PC);
-        this.advancePC();
-        yield undefined;
-        const highByte = this.nes.read(this.register_PC) << 8;
-        this.advancePC();
-        yield undefined;
-
-        const address = highByte | lowByte;
-
-        if (this.isStoreInstruction() || lowByte + this.register_Y > 0xFF) {
-            // Oops cycle
-            yield undefined;
+        if (this.currentInstructionCycle == 1) {
+            const highByte = this.nes.read(this.register_PC) << 8;
+            this.currentInstructionAddress |= highByte;
+            this.advancePC();
+            return false;
         }
 
-        yield (address + this.register_Y) % 0x10000;
+        if (this.currentInstructionCycle == 2) {
+            const lowByte = this.currentInstructionAddress & 0xFF;
+
+            if (this.isStoreInstruction() || lowByte + this.register_X > 0xFF) {
+                // Oops cycle
+                return false;
+            }
+        }
+
+        this.currentInstructionAddress = (this.currentInstructionAddress + this.register_X) % 0x10000;
+        return true;
     }
 
-    * getAbsoluteAddress(): Generator<number | undefined> {
-        let address = this.nes.read(this.register_PC);
-        this.advancePC();
-        yield undefined;
-        address |= this.nes.read(this.register_PC) << 8;
-        yield undefined;
-        this.advancePC();
-        yield address;
+    getAbsoluteYAddress(): boolean {
+        if (this.currentInstructionCycle == 0) {
+            const lowByte = this.nes.read(this.register_PC);
+            this.currentInstructionAddress = lowByte;
+            this.advancePC();
+            return false;
+        }
+
+        if (this.currentInstructionCycle == 1) {
+            const highByte = this.nes.read(this.register_PC) << 8;
+            if (this.currentInstructionAddress) {
+                this.currentInstructionAddress |= highByte;
+            }
+            this.advancePC();
+            return false;
+        }
+
+        if (this.currentInstructionAddress) {
+            if (this.currentInstructionCycle == 2) {
+                const lowByte = this.currentInstructionAddress & 0xFF;
+                if (this.isStoreInstruction() || lowByte + this.register_Y > 0xFF) {
+                    // Oops cycle
+                    return false;
+                }
+            }
+
+            this.currentInstructionAddress = (this.currentInstructionAddress + this.register_Y) % 0x10000;
+        }
+
+        return true;
     }
 
-    * getZeroPageAddress(): Generator<number | undefined> {
-        const address = this.nes.read(this.register_PC);
-        this.advancePC();
-        yield undefined;
-        yield address;
+    getAbsoluteAddress(): boolean {
+        if (this.currentInstructionCycle == 0) {
+            this.currentInstructionAddress = this.nes.read(this.register_PC);
+            this.advancePC();
+            return false;
+        }
+
+        if (this.currentInstructionAddress == undefined)
+            throw new Error(`currentInstructionAddress should be set by now!`);
+
+        if (this.currentInstructionCycle == 1) {
+            this.currentInstructionAddress |= this.nes.read(this.register_PC) << 8;
+            this.advancePC();
+            return false;
+        }
+
+        return true;
     }
 
-    * getZeroPageXAddress(): Generator<number | undefined> {
-        const address = this.nes.read(this.register_PC);
-        this.advancePC();
-        yield undefined;
-        yield undefined; // Yield extra cycle
+    getZeroPageAddress(): boolean {
+        if (this.currentInstructionCycle == 0) {
+            const address = this.nes.read(this.register_PC);
+            this.currentInstructionAddress = address;
+            this.advancePC();
+            return false;
+        }
 
-        const finalAddress = (address + this.register_X) % 0x100;
-        yield finalAddress;
+        return true;
     }
 
-    * getZeroPageYAddress(): Generator<number | undefined> {
-        const address = this.nes.read(this.register_PC);
-        this.advancePC();
-        yield undefined;
-        yield undefined; // Yield extra cycle
+    getZeroPageXAddress(): boolean {
+        if (this.currentInstructionCycle == 0) {
+            const address = this.nes.read(this.register_PC);
+            const finalAddress = (address + this.register_X) % 0x100;
+            this.currentInstructionAddress = finalAddress;
+            this.advancePC();
+        }
 
-        yield ((address + this.register_Y) % 0x100);
+        if (this.currentInstructionCycle == 0 || this.currentInstructionCycle == 1)
+            return false;
+
+        return true;
     }
 
-    * getIndirectAddress(): Generator<number | undefined> {
-        const lowByte = this.nes.read(this.register_PC);
-        this.advancePC();
-        yield undefined;
-        const highByte = this.nes.read(this.register_PC);
-        this.advancePC();
-        let address = (highByte << 8) | lowByte;
-        const finalAddressLow = this.nes.read(address);
+    getZeroPageYAddress(): boolean {
+        if (this.currentInstructionCycle == 0) {
+            const address = this.nes.read(this.register_PC);
+            this.currentInstructionAddress = (address + this.register_Y) % 0x100;
+            this.advancePC();
+        }
 
-        address = (highByte << 8) | ((lowByte + 1) % 0x100);
-        const finalAddressHigh = this.nes.read(address);
-        yield* this.noop_loop(3);
+        if (this.currentInstructionCycle == 0 || this.currentInstructionCycle == 1)
+            return false;
 
-        const finalAddress = (finalAddressHigh << 8) | finalAddressLow;
-
-        //console.log(`getIndirectAddress (${numberToHex(highByte)},${numberToHex(lowByte)}) = A: ${numberToHex(address)} F: ${numberToHex(finalAddress)}`);
-
-        yield finalAddress;
+        return true;
     }
 
+    getIndirectAddress(): boolean {
+        if (this.currentInstructionCycle == 0) {
+            const lowByte = this.nes.read(this.register_PC);
+            this.currentInstructionAddress = lowByte;
+            this.advancePC();
+            return false;
+        }
+
+        if (this.currentInstructionAddress == undefined)
+            throw new Error(`currentInstructionAddress should be set by now!`);
+
+        if (this.currentInstructionCycle == 1) {
+            const highByte = this.nes.read(this.register_PC);
+            this.currentInstructionAddress |= highByte << 8;
+            this.advancePC();
+            return false;
+        }
+
+        if (this.currentInstructionCycle == 2) {
+            return false;
+        }
+
+        if (this.currentInstructionCycle == 3) {
+            const finalAddressLow = this.nes.read(this.currentInstructionAddress);
+
+            const lowByte = this.currentInstructionAddress & 0xFF;
+            const highByte = (this.currentInstructionAddress >> 8) & 0xFF;
+
+            const address = (highByte << 8) | ((lowByte + 1) % 0x100);
+            const finalAddressHigh = this.nes.read(address);
+
+            const finalAddress = (finalAddressHigh << 8) | finalAddressLow;
+
+            //console.log(`getIndirectAddress (${numberToHex(highByte)},${numberToHex(lowByte)}) = A: ${numberToHex(address)} F: ${numberToHex(finalAddress)}`);
+
+            this.currentInstructionAddress = finalAddress;
+        }
+
+        return true;
+    }
 
     toggleFlag(flag: number, value: boolean) {
         if (value) {
@@ -1539,12 +1501,6 @@ export class Cpu2A03 {
     }
 
 
-    * noop_loop(count: number) {
-        for (let i = 0; i < count; i++) {
-            yield;
-        }
-    }
-
     isStoreInstruction(): boolean {
         return (this.instructionResult.instructionMetadata?.name.startsWith("ST") ||
             this.instructionResult.instructionMetadata?.name.startsWith("LS") ||
@@ -1575,246 +1531,274 @@ export class Cpu2A03 {
     getInstructionFunc(instructionOpCode: number): Instruction {
         const instructionData = instructionMap[instructionOpCode];
 
-        let instructionFunc: InstructionFunc | undefined = undefined;
+        let instructionFunc: Instruction | undefined = undefined;
 
-        //console.log(`Processing instruction: ${instructionData.name} ${AddressingModeNames[instructionData.mode]}`);
+        this.currentInstructionAddressingMode = instructionData.mode;
+
+        if (!(this.currentInstructionAddressingMode == AddressingMode.Implied || instructionData.mode == AddressingMode.Immediate))
+            this.currentInstructionAddressFunction = this.getAddressFunction(this.currentInstructionAddressingMode);
 
         if (instructionData.instruction != undefined) {
-            instructionFunc = instructionData.instruction;
+            return instructionData.instruction;
         }
-        else {
 
-            switch (instructionData.name) {
-                case "ADC":
-                    instructionFunc = this.processInstruction_ADC;
-                    break;
-                case "SBC":
-                    instructionFunc = this.processInstruction_SBC;
-                    break;
-                case "AND":
-                    instructionFunc = this.processInstruction_AND;
-                    break;
-                case "BIT":
-                    instructionFunc = this.processInstruction_BIT;
-                    break;
-                case "ORA":
-                    instructionFunc = this.processInstruction_ORA;
-                    break;
-                case "EOR":
-                    instructionFunc = this.processInstruction_EOR;
-                    break;
-                case "ASL":
-                    instructionFunc = this.processInstruction_ASL;
-                    break;
-                case "JMP":
-                    instructionFunc = this.processInstruction_JMP;
-                    break;
-                case "JSR":
-                    instructionFunc = this.processInstruction_JSR;
-                    break;
-                case "RTS":
-                    instructionFunc = this.processInstruction_RTS;
-                    break;
-                case "RTI":
-                    instructionFunc = this.processInstruction_RTI;
-                    break;
-                case "LDX":
-                    instructionFunc = this.processInstruction_LDX;
-                    break;
-                case "LDY":
-                    instructionFunc = this.processInstruction_LDY;
-                    break;
-                case "LDA":
-                    instructionFunc = this.processInstruction_LDA;
-                    break;
-                case "STX":
-                    instructionFunc = this.processInstruction_STX;
-                    break;
-                case "STY":
-                    instructionFunc = this.processInstruction_STY;
-                    break;
-                case "STA":
-                    instructionFunc = this.processInstruction_STA;
-                    break;
-                case "NOP":
-                    instructionFunc = () => this.processInstruction_NOP(0, 0);
-                    break;
-                case "*NOP":
-                    instructionFunc = () => this.processInstruction_NOP(1, 1);
-                    break;
-                case "!NOP":
-                    instructionFunc = () => this.processInstruction_NOP(2, 2);
-                    break;
-                case "&NOP":
-                    instructionFunc = () => this.processInstruction_NOP(2, 1);
-                    break;
-                case "+NOP":
-                    instructionFunc = () => this.processInstruction_NOP(0, 1);
-                    break;
-                case "@NOP":
-                    instructionFunc = this.processInstruction_NOP_ReadAddress;
-                    break;
-                case "SEC":
-                    instructionFunc = this.processInstruction_SEC;
-                    break;
-                case "CLC":
-                    instructionFunc = this.processInstruction_CLC;
-                    break;
-                case "CLD":
-                    instructionFunc = this.processInstruction_CLD;
-                    break;
-                case "SED":
-                    instructionFunc = this.processInstruction_SED;
-                    break;
-                case "CLI":
-                    instructionFunc = this.processInstruction_CLI;
-                    break;
-                case "SEI":
-                    instructionFunc = this.processInstruction_SEI;
-                    break;
-                case "CLV":
-                    instructionFunc = this.processInstruction_CLV;
-                    break;
-                case "BCC":
-                    instructionFunc = this.processInstruction_BCC;
-                    break;
-                case "BCS":
-                    instructionFunc = this.processInstruction_BCS;
-                    break;
-                case "BEQ":
-                    instructionFunc = this.processInstruction_BEQ;
-                    break;
-                case "BNE":
-                    instructionFunc = this.processInstruction_BNE;
-                    break;
-                case "BPL":
-                    instructionFunc = this.processInstruction_BPL;
-                    break;
-                case "BMI":
-                    instructionFunc = this.processInstruction_BMI;
-                    break;
-                case "BVC":
-                    instructionFunc = this.processInstruction_BVC;
-                    break;
-                case "BVS":
-                    instructionFunc = this.processInstruction_BVS;
-                    break;
-                case "CMP":
-                    instructionFunc = this.processInstruction_CMP;
-                    break;
-                case "CPX":
-                    instructionFunc = this.processInstruction_CPX;
-                    break;
-                case "CPY":
-                    instructionFunc = this.processInstruction_CPY;
-                    break;
-                case "PHP":
-                    instructionFunc = this.processInstruction_PHP;
-                    break;
-                case "PLP":
-                    instructionFunc = this.processInstruction_PLP;
-                    break;
-                case "PLA":
-                    instructionFunc = this.processInstruction_PLA;
-                    break;
-                case "PHA":
-                    instructionFunc = this.processInstruction_PHA;
-                    break;
-                case "INC":
-                    instructionFunc = this.processInstruction_INC;
-                    break;
-                case "INX":
-                    instructionFunc = this.processInstruction_INX;
-                    break;
-                case "INY":
-                    instructionFunc = this.processInstruction_INY;
-                    break;
-                case "DEC":
-                    instructionFunc = this.processInstruction_DEC;
-                    break;
-                case "DEX":
-                    instructionFunc = this.processInstruction_DEX;
-                    break;
-                case "DEY":
-                    instructionFunc = this.processInstruction_DEY;
-                    break;
-                case "TAX":
-                    instructionFunc = this.processInstruction_TAX;
-                    break;
-                case "TAY":
-                    instructionFunc = this.processInstruction_TAY;
-                    break;
-                case "TXA":
-                    instructionFunc = this.processInstruction_TXA;
-                    break;
-                case "TYA":
-                    instructionFunc = this.processInstruction_TYA;
-                    break;
-                case "TSX":
-                    instructionFunc = this.processInstruction_TSX;
-                    break;
-                case "TXS":
-                    instructionFunc = this.processInstruction_TXS;
-                    break;
-                case "LSR":
-                    instructionFunc = this.processInstruction_LSR;
-                    break;
-                case "ROL":
-                    instructionFunc = this.processInstruction_ROL;
-                    break;
-                case "ROR":
-                    instructionFunc = this.processInstruction_ROR;
-                    break;
-                case "*LAX":
-                    instructionFunc = this.processInstruction_LAX;
-                    break;
-                case "*SAX":
-                    instructionFunc = this.processInstruction_SAX;
-                    break;
-                case "DCP":
-                    instructionFunc = this.processInstruction_DCP;
-                    break;
-                case "ISB":
-                    instructionFunc = this.processInstruction_ISB;
-                    break;
-                case "SLO":
-                    instructionFunc = this.processInstruction_SLO;
-                    break;
-                case "RLA":
-                    instructionFunc = this.processInstruction_RLA;
-                    break;
-                case "SRE":
-                    instructionFunc = this.processInstruction_SRE;
-                    break;
-                case "RRA":
-                    instructionFunc = this.processInstruction_RRA;
-                    break;
-                case "BRK":
-                    instructionFunc = this.processInstruction_BRK;
-                    break;
+        switch (instructionData.name) {
+            case "ADC":
+                instructionFunc = this.processInstruction_ADC;
+                break;
+            case "SBC":
+                instructionFunc = this.processInstruction_SBC;
+                break;
+            case "AND":
+                instructionFunc = this.processInstruction_AND;
+                break;
+            case "BIT":
+                instructionFunc = this.processInstruction_BIT;
+                break;
+            case "ORA":
+                instructionFunc = this.processInstruction_ORA;
+                break;
+            case "EOR":
+                instructionFunc = this.processInstruction_EOR;
+                break;
+            case "ASL":
+                instructionFunc = this.processInstruction_ASL;
+                break;
+            case "JMP":
+                instructionFunc = this.processInstruction_JMP;
+                break;
+            case "JSR":
+                instructionFunc = this.processInstruction_JSR;
+                break;
+            case "RTS":
+                instructionFunc = this.processInstruction_RTS;
+                break;
+            case "RTI":
+                instructionFunc = this.processInstruction_RTI;
+                break;
+            case "LDX":
+                instructionFunc = this.processInstruction_LDX;
+                break;
+            case "LDY":
+                instructionFunc = this.processInstruction_LDY;
+                break;
+            case "LDA":
+                instructionFunc = this.processInstruction_LDA;
+                break;
+            case "STX":
+                instructionFunc = this.processInstruction_STX;
+                break;
+            case "STY":
+                instructionFunc = this.processInstruction_STY;
+                break;
+            case "STA":
+                instructionFunc = this.processInstruction_STA;
+                break;
+            case "NOP":
+                instructionFunc = () => this.processInstruction_NOP(0, 0);
+                break;
+            case "*NOP":
+                instructionFunc = () => this.processInstruction_NOP(1, 1);
+                break;
+            case "!NOP":
+                instructionFunc = () => this.processInstruction_NOP(2, 2);
+                break;
+            case "&NOP":
+                instructionFunc = () => this.processInstruction_NOP(2, 1);
+                break;
+            case "+NOP":
+                instructionFunc = () => this.processInstruction_NOP(0, 1);
+                break;
+            case "@NOP":
+                instructionFunc = this.processInstruction_NOP_ReadAddress;
+                break;
+            case "SEC":
+                instructionFunc = this.processInstruction_SEC;
+                break;
+            case "CLC":
+                instructionFunc = this.processInstruction_CLC;
+                break;
+            case "CLD":
+                instructionFunc = this.processInstruction_CLD;
+                break;
+            case "SED":
+                instructionFunc = this.processInstruction_SED;
+                break;
+            case "CLI":
+                instructionFunc = this.processInstruction_CLI;
+                break;
+            case "SEI":
+                instructionFunc = this.processInstruction_SEI;
+                break;
+            case "CLV":
+                instructionFunc = this.processInstruction_CLV;
+                break;
+            case "BCC":
+                instructionFunc = this.processInstruction_BCC;
+                break;
+            case "BCS":
+                instructionFunc = this.processInstruction_BCS;
+                break;
+            case "BEQ":
+                instructionFunc = this.processInstruction_BEQ;
+                break;
+            case "BNE":
+                instructionFunc = this.processInstruction_BNE;
+                break;
+            case "BPL":
+                instructionFunc = this.processInstruction_BPL;
+                break;
+            case "BMI":
+                instructionFunc = this.processInstruction_BMI;
+                break;
+            case "BVC":
+                instructionFunc = this.processInstruction_BVC;
+                break;
+            case "BVS":
+                instructionFunc = this.processInstruction_BVS;
+                break;
+            case "CMP":
+                instructionFunc = this.processInstruction_CMP;
+                break;
+            case "CPX":
+                instructionFunc = this.processInstruction_CPX;
+                break;
+            case "CPY":
+                instructionFunc = this.processInstruction_CPY;
+                break;
+            case "PHP":
+                instructionFunc = this.processInstruction_PHP;
+                break;
+            case "PLP":
+                instructionFunc = this.processInstruction_PLP;
+                break;
+            case "PLA":
+                instructionFunc = this.processInstruction_PLA;
+                break;
+            case "PHA":
+                instructionFunc = this.processInstruction_PHA;
+                break;
+            case "INC":
+                instructionFunc = this.processInstruction_INC;
+                break;
+            case "INX":
+                instructionFunc = this.processInstruction_INX;
+                break;
+            case "INY":
+                instructionFunc = this.processInstruction_INY;
+                break;
+            case "DEC":
+                instructionFunc = this.processInstruction_DEC;
+                break;
+            case "DEX":
+                instructionFunc = this.processInstruction_DEX;
+                break;
+            case "DEY":
+                instructionFunc = this.processInstruction_DEY;
+                break;
+            case "TAX":
+                instructionFunc = this.processInstruction_TAX;
+                break;
+            case "TAY":
+                instructionFunc = this.processInstruction_TAY;
+                break;
+            case "TXA":
+                instructionFunc = this.processInstruction_TXA;
+                break;
+            case "TYA":
+                instructionFunc = this.processInstruction_TYA;
+                break;
+            case "TSX":
+                instructionFunc = this.processInstruction_TSX;
+                break;
+            case "TXS":
+                instructionFunc = this.processInstruction_TXS;
+                break;
+            case "LSR":
+                instructionFunc = this.processInstruction_LSR;
+                break;
+            case "ROL":
+                instructionFunc = this.processInstruction_ROL;
+                break;
+            case "ROR":
+                instructionFunc = this.processInstruction_ROR;
+                break;
+            case "*LAX":
+                instructionFunc = this.processInstruction_LAX;
+                break;
+            case "*SAX":
+                instructionFunc = this.processInstruction_SAX;
+                break;
+            case "DCP":
+                instructionFunc = this.processInstruction_DCP;
+                break;
+            case "ISB":
+                instructionFunc = this.processInstruction_ISB;
+                break;
+            case "SLO":
+                instructionFunc = this.processInstruction_SLO;
+                break;
+            case "RLA":
+                instructionFunc = this.processInstruction_RLA;
+                break;
+            case "SRE":
+                instructionFunc = this.processInstruction_SRE;
+                break;
+            case "RRA":
+                instructionFunc = this.processInstruction_RRA;
+                break;
+            case "BRK":
+                instructionFunc = this.processInstruction_BRK;
+                break;
 
-                default:
-                    throw new Error(`Unknown instruction: ${instructionData.name}`);
+            default:
+                throw new Error(`Unknown instruction: ${instructionData.name}`);
+        }
+
+        const cpu = this;
+
+        const wrappedInstruction = function (): boolean {
+            if (instructionFunc == undefined) {
+                throw new Error(`Instruction function is undefined!`);
             }
 
-            instructionData.instruction = instructionFunc;
-        }
+            //console.log(`Instruction: ${instructionData.name} instr_cycles: ${cpu.currentInstructionCycle} Addressing mode: ${AddressingModeNames[cpu.currentInstructionAddressingMode]} Cycles: ${cpu.cpuCycles} address function: ${cpu.currentInstructionAddressFunction} PC: ${numberToHex(cpu.register_PC)}`);
 
-        if (instructionFunc == undefined) {
+            if (cpu.currentInstructionAddressFunction != undefined) {
+                cpu.currentInstructionCycle++;
+                const result = cpu.currentInstructionAddressFunction.call(cpu);
+
+                if (result) {
+                    cpu.currentInstructionAddressFunction = undefined;
+                    cpu.instructionResult.target_address = cpu.currentInstructionAddress;
+                    cpu.currentInstructionCycle = -1;
+                }
+                else {
+                    return false;
+                }
+            }
+
+            if (cpu.currentInstructionCycle == -1) {
+                cpu.currentInstructionCycle = 0;
+
+                if (!instructionData.noInitialCycleDelay)
+                    return false;
+            }
+
+
+            //console.log(`After Memory = clock: ${cpu.cpuCycles} ${AddressingModeNames[cpu.currentInstructionAddressingMode]} ${cpu.currentInstructionAddress}`);
+
+            const result = instructionFunc.call(cpu);
+            cpu.currentInstructionCycle++;
+            return result;
+        };
+
+        instructionData.instruction = wrappedInstruction;
+
+        if (instructionData.instruction == undefined) {
             throw new Error(`Unknown instruction: ${instructionData.name}`);
         }
 
-        const instructionFunctionGenerator = instructionFunc.call(this, instructionData.mode);
-
-        let instructionWrapper = function* () {
-            // Jump function should execute immediately
-            if (!(instructionData.name == "JMP" || instructionData.name == "JSR")) {
-                yield;
-            }
-
-            yield* instructionFunctionGenerator;
-        }();
-
-        return instructionWrapper;
+        return wrappedInstruction;
     }
 }

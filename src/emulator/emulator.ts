@@ -28,6 +28,12 @@ class RingBuffer<T> {
             ...this.buffer.slice(0, this.index),
         ] as T[];
     }
+
+    clear() {
+        this.buffer.fill(null);
+        this.index = 0;
+        this.full = false;
+    }
 }
 
 
@@ -123,7 +129,7 @@ export class NesVibes {
                 const canvas = document.getElementById('canvas')!;
                 p5.createCanvas(256 * this.scale, (240 - (this.overscan ? 16 : 0)) * this.scale).parent(canvas);
                 p5.background(0);
-                p5.frameRate(60);
+                p5.frameRate(1);
             };
         };
 
@@ -207,6 +213,7 @@ export class NesVibes {
             resetButton.addEventListener('click', () => {
                 this.nes.onReset();
                 logMessages.length = 0;
+                instructionLogMessages.clear();
                 this.updateLogWindow();
             });
         }

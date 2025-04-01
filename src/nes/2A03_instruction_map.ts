@@ -1,4 +1,4 @@
-import { InstructionFunc } from "./cpu_2A03";
+import { Instruction } from "./cpu_2A03";
 
 // Interface for instruction metadata
 export interface InstructionMetadata {
@@ -6,7 +6,8 @@ export interface InstructionMetadata {
     mode: AddressingMode;
     cycles: number;
     instruction_length: number;
-    instruction?: InstructionFunc;
+    instruction?: Instruction;
+    noInitialCycleDelay?: boolean;
 }
 
 
@@ -207,9 +208,9 @@ instructionMap[0x6E] = { name: 'ROR', mode: AddressingMode.Absolute, cycles: 6, 
 instructionMap[0x7E] = { name: 'ROR', mode: AddressingMode.AbsoluteX, cycles: 7, instruction_length: 3 };
 
 // Jumps & Calls
-instructionMap[0x4C] = { name: 'JMP', mode: AddressingMode.Absolute, cycles: 3, instruction_length: 3 };
-instructionMap[0x6C] = { name: 'JMP', mode: AddressingMode.Indirect, cycles: 5, instruction_length: 3 };
-instructionMap[0x20] = { name: 'JSR', mode: AddressingMode.Absolute, cycles: 6, instruction_length: 3 };
+instructionMap[0x4C] = { name: 'JMP', mode: AddressingMode.Absolute, cycles: 3, instruction_length: 3, noInitialCycleDelay: true };
+instructionMap[0x6C] = { name: 'JMP', mode: AddressingMode.Indirect, cycles: 5, instruction_length: 3, noInitialCycleDelay: true };
+instructionMap[0x20] = { name: 'JSR', mode: AddressingMode.Absolute, cycles: 6, instruction_length: 3, noInitialCycleDelay: true };
 instructionMap[0x60] = { name: 'RTS', mode: AddressingMode.Implied, cycles: 6, instruction_length: 1 };
 
 // Branches
