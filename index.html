@@ -71,7 +71,14 @@
             left: 65.6%;
             width: 30%;
             height: 16%;
-            z-index: 1000;
+            z-index: 100;
+        }
+
+        .load-helper {
+            position: absolute;
+            top: 68%;
+            left: 69%;
+            z-index: 9;
         }
 
         .playButton {
@@ -111,7 +118,7 @@
 </head>
 
 <body class="m-0 p-5 min-h-screen flex flex-col gap-5">
-    <div x-data="{ showPlayButton: true, showRomSelect: false }">
+    <div x-data="{ showPlayButton: true, showRomSelect: false, showLoadHelper: true }">
         <img src="images/logo.png" class="logo" alt="NESVibes" />
 
         <div class="bg-blue-900/80 rounded-lg p-4 text-white font-mono hints">
@@ -155,8 +162,12 @@
                 <img src="images/play.png" class="play-button" alt="Play" />
             </button>
 
+            <div x-show="showLoadHelper"
+                class="load-helper bg-blue-900/90 text-white text-sm font-mono py-2 px-4 rounded-lg whitespace-nowrap">
+                Hint: Click here to load a cartridge
+            </div>
             <button class="nes-btn btn-primary cursor-pointer" id="nesVibesScreen-btn"
-                @click="showRomSelect = true"></button>
+                @click="showRomSelect = true; showLoadHelper = false"></button>
         </div>
 
         <div x-show="showRomSelect"

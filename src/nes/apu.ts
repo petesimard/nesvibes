@@ -41,6 +41,18 @@ export class APU implements BusDevice {
             this.dispose();
         });
 
+        window.addEventListener('blur', () => {
+            if (this.masterGainNode) {
+                this.masterGainNode.gain.setValueAtTime(0, this.audioManager.audioContext!.currentTime);
+            }
+        });
+
+        window.addEventListener('focus', () => {
+            if (this.masterGainNode && !this.nes.isPaused()) {
+                this.masterGainNode.gain.setValueAtTime(1, this.audioManager.audioContext!.currentTime);
+            }
+        });
+
         this.nes.onPausedListeners.push(() => {
             if (this.masterGainNode) {
                 this.masterGainNode.gain.setValueAtTime(0, this.audioManager.audioContext!.currentTime);

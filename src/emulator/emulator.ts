@@ -99,7 +99,7 @@ if (spriteView) {
 
 
 const logMessages: string[] = [];
-const instructionLogMessages: RingBuffer<InstructionResult> = new RingBuffer<InstructionResult>(500000);
+const instructionLogMessages: RingBuffer<InstructionResult> = new RingBuffer<InstructionResult>(100000);
 
 export class NesVibes {
     private p5: P5;

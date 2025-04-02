@@ -100,62 +100,78 @@ export class Mapper04 extends Cartridge {
         }
     }
 
-
     private mapPPUAddress(address: number): number {
         let bankAddress = 0;
+        let bankSize = 0x400;
+        let bankIndex = -1;
+        let baseAddress = 0;
+        address &= 0x1FFF;
 
-        if (address >= 0x0000 && address <= 0x07FF && this.chrInversion == 0) {
-            bankAddress = this.bankRegisters[0] * 0x400;
-        }
-        else if (address >= 0x0000 && address <= 0x03FF && this.chrInversion == 1) {
-            bankAddress = this.bankRegisters[2] * 0x400;
-        }
-        else if (address >= 0x0400 && address <= 0x07FF && this.chrInversion == 1) {
-            bankAddress = this.bankRegisters[3] * 0x400;
-            address -= 0x0400;
-        }
-        else if (address >= 0x0800 && address <= 0x0FFF && this.chrInversion == 0) {
-            bankAddress = this.bankRegisters[1] * 0x400;
-            address -= 0x0800;
-        }
-        else if (address >= 0x0800 && address <= 0x0BFF && this.chrInversion == 1) {
-            bankAddress = this.bankRegisters[4] * 0x400;
-            address -= 0x0800;
-        }
-        else if (address >= 0x0C00 && address <= 0x0FFF && this.chrInversion == 1) {
-            bankAddress = this.bankRegisters[5] * 0x400;
-            address -= 0x0C00;
-        }
-        else if (address >= 0x1000 && address <= 0x13FF && this.chrInversion == 0) {
-            bankAddress = this.bankRegisters[2] * 0x400;
-            address -= 0x1000;
-        }
-        else if (address >= 0x1000 && address <= 0x17FF && this.chrInversion == 1) {
-            bankAddress = this.bankRegisters[0] * 0x800;
-            address -= 0x1000;
-        }
-        else if (address >= 0x1400 && address <= 0x17FF && this.chrInversion == 0) {
-            bankAddress = this.bankRegisters[3] * 0x400;
-            address -= 0x1400;
-        }
-        else if (address >= 0x1800 && address <= 0x1BFF && this.chrInversion == 0) {
-            bankAddress = this.bankRegisters[4] * 0x400;
-            address -= 0x1800;
-        }
-        else if (address >= 0x1800 && address <= 0x1FFF && this.chrInversion == 1) {
-            bankAddress = this.bankRegisters[1] * 0x400;
-            address -= 0x1800;
-        }
-        else if (address >= 0x1C00 && address <= 0x1FFF && this.chrInversion == 0) {
-            bankAddress = this.bankRegisters[5] * 0x400;
-            address -= 0x1C00;
-        }
-        else {
-            throw new Error(`Read from unknown cartridge address: ${numberToHex(address)}`);
+        if (this.chrInversion == 0) {
+            if (address < 0x0800) {
+                bankIndex = 0;
+                bankSize = 0x800;
+                baseAddress = 0x0000;
+            } else if (address < 0x1000) {
+                bankIndex = 1;
+                bankSize = 0x800;
+                baseAddress = 0x0800;
+            } else if (address < 0x1400) {
+                bankIndex = 2;
+                baseAddress = 0x1000;
+            } else if (address < 0x1800) {
+                bankIndex = 3;
+                baseAddress = 0x1400;
+            } else if (address < 0x1C00) {
+                bankIndex = 4;
+                baseAddress = 0x1800;
+            } else {
+                bankIndex = 5;
+                baseAddress = 0x1C00;
+            }
+        } else {
+            if (address < 0x0400) {
+                bankIndex = 2;
+                baseAddress = 0x0000;
+            } else if (address < 0x0800) {
+                bankIndex = 3;
+                baseAddress = 0x0400;
+            } else if (address < 0x0C00) {
+                bankIndex = 4;
+                baseAddress = 0x0800;
+            } else if (address < 0x1000) {
+                bankIndex = 5;
+                baseAddress = 0x0C00;
+            } else if (address < 0x1800) {
+                bankIndex = 0;
+                bankSize = 0x800;
+                baseAddress = 0x1000;
+            } else {
+                bankIndex = 1;
+                bankSize = 0x800;
+                baseAddress = 0x1800;
+            }
         }
 
-        return bankAddress + address;
+        if (bankIndex === -1) {
+            throw new Error(`Invalid PPU address for mapping: ${numberToHex(address)}`);
+        }
+
+        let bankValue = this.bankRegisters[bankIndex];
+        if (bankIndex < 2) {
+            bankValue &= 0xFE;
+            bankAddress = bankValue * 0x400;
+        } else {
+            bankAddress = bankValue * 0x400;
+        }
+
+        let offset = address - baseAddress;
+
+        let finalAddress = (bankAddress + offset) % this.characterRom.length;
+
+        return finalAddress;
     }
+
 
     private mapROMAddress(address: number): number {
         let bankAddress = 0;
@@ -194,10 +210,6 @@ export class Mapper04 extends Cartridge {
     }
 
     mapNametableAddress(address: number): number {
-
-        // if (this.header.alternativeNametableLoyout) {
-        //     return address;
-        // }
 
         if (this.nametableArrangement == 0) {
             // Vertical mirroring
