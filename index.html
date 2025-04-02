@@ -185,7 +185,8 @@
                         </template>
                     </div>
                 </div>
-                <input type="file" id="rom-loader-input" class="hidden">
+                <input type="file" id="rom-loader-input" class="hidden"
+                    @change="handleCustomRomUpload($event); showPlayButton = false; showRomSelect = false;">
                 <div class="mt-6 text-center">
                     <label for="rom-loader-input"
                         class="inline-block bg-blue-600 hover:bg-blue-700 text-white font-mono text-sm px-4 py-2 rounded cursor-pointer transition-colors">

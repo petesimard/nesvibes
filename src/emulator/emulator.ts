@@ -311,8 +311,13 @@ export class NesVibes {
         logContainer!.scrollTop = logContainer!.scrollHeight;
     }
 
-    async setup(rom: string) {
-        await this.loadROMFromURL(rom);
+    async setup(rom: string | ArrayBuffer) {
+        if (typeof rom === 'string') {
+            await this.loadROMFromURL(rom);
+        } else {
+            await this.nes.loadROM(new Uint8Array(rom));
+        }
+
         this.nes.onReset();
         await this.nes.initialize();
 

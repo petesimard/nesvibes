@@ -115,6 +115,10 @@ export class Cpu2A03 {
             this.pendingInterruptDisableFlag = undefined;
         }
 
+        if (this.pendingIRQFlag && this.status_flags & this.FLAG_INTERRUPT) {
+            this.pendingIRQFlag = false;
+        }
+
 
         if (this.pendingNonMaskableInterruptFlag) {
             this.pendingNonMaskableInterruptFlag = false;
@@ -322,19 +326,21 @@ export class Cpu2A03 {
             this.pushStack16(currentPC);
         }
 
-        if (this.currentInstructionCycle <= 3)
-            return false;
 
-
-        if (this.currentInstructionCycle == 4) {
+        if (this.currentInstructionCycle == 1) {
             this.pushStack(this.status_flags & ~this.FLAG_BREAK);
             return false;
         }
 
-        if (this.currentInstructionCycle == 5) {
+        if (this.currentInstructionCycle == 2) {
             this.register_PC = this.nes.read16(0xFFFE);
             return false;
         }
+
+
+        if (this.currentInstructionCycle <= 10)
+            return false;
+
 
         return true;
     }
