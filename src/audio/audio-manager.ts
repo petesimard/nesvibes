@@ -20,15 +20,15 @@ export class AudioManager {
                 await this.audioContext.resume();
             }
 
-            await this.audioContext.audioWorklet.addModule('/src/audio/nes-audio-processor.ts');
+            // await this.audioContext.audioWorklet.addModule('/src/audio/nes-audio-processor.ts');
 
-            this.audioWorklet = new AudioWorkletNode(this.audioContext, 'nes-audio-processor', {
-                numberOfInputs: 0,
-                numberOfOutputs: 1,
-                outputChannelCount: [1]
-            });
+            // this.audioWorklet = new AudioWorkletNode(this.audioContext, 'nes-audio-processor', {
+            //     numberOfInputs: 0,
+            //     numberOfOutputs: 1,
+            //     outputChannelCount: [1]
+            // });
 
-            this.audioWorklet.connect(this.audioContext.destination);
+            // this.audioWorklet.connect(this.audioContext.destination);
             this.isInitialized = true;
             console.log("AudioManager initialized");
         } catch (error) {

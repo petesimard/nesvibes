@@ -1,4 +1,3 @@
-import P5 from "p5";
 import { Nes } from "../nes/nes";
 import { numberToHex } from "./utils";
 import p5 from "p5";
@@ -102,7 +101,7 @@ const logMessages: string[] = [];
 const instructionLogMessages: RingBuffer<InstructionResult> = new RingBuffer<InstructionResult>(100000);
 
 export class NesVibes {
-    private p5: P5;
+    private p5: p5;
     private scale: number;
     private nes: Nes;
 
@@ -124,7 +123,7 @@ export class NesVibes {
         const screenWidth = nesVibesScreen.clientWidth;
         this.scale = screenWidth / 256;
 
-        const sketch = (p5: P5) => {
+        const sketch = (p5: p5) => {
             p5.setup = () => {
                 const canvas = document.getElementById('canvas')!;
                 p5.createCanvas(256 * this.scale, (240 - (this.overscan ? 16 : 0)) * this.scale).parent(canvas);
@@ -149,7 +148,7 @@ export class NesVibes {
             this.controllerReadIndex = 0;
         }
 
-        this.p5 = new P5(sketch);
+        this.p5 = new p5(sketch);
         this.nes = new Nes(this.overscan,
             (message: string) => {
                 if (!logContainer)

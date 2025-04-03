@@ -2,6 +2,10 @@
 
 NESVibes is a Nintendo Entertainment System (NES) emulator written in TypeScript that aims to provide cycle-accurate emulation of the original hardware. The emulator strives to replicate the behavior of the NES at the hardware level, ensuring accurate timing.
 
+# Try it out!
+
+http://vibes.hopstory.com/
+
 # What's working
 
 - CPU

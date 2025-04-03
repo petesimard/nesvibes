@@ -8,7 +8,7 @@ export type AddressFunction = () => boolean;
 const DEBUG_BREAKPOINT_CYCLE: number | undefined = undefined;
 //const DEBUG_BREAKPOINT_CYCLE: number | undefined = 2560;
 
-const LOG_INSTRUCTIONS: boolean = true;
+const LOG_INSTRUCTIONS: boolean = false;
 
 export class InstructionResult {
     cycles: number = 0;
