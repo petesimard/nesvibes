@@ -11,12 +11,12 @@ http://vibes.hopstory.com/
 - CPU
 - PPU 
 - Cartridge loading
-- Mapper 0, 1, 4
+- Mapper 0, 1, 2, 4
 
 # What's not working
 
 - Other mappers
-- APU
+- Some APU sounds
 - Some MMC3 games have improper IRQ timing
 
 ## Development
@@ -53,7 +53,3 @@ This project is licensed under the MIT License - see the LICENSE file for detail
 - Thanks to the NES dev community for their extensive documentation
 - Special thanks to the authors of various technical documents about NES hardware
 - Inspired by other cycle-accurate emulators in the community
-
-## Status
-
-This is an active project under development. While many features are implemented and working, there's always room for improvement in accuracy and compatibility. 
