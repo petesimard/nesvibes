@@ -10,6 +10,7 @@ http://vibes.hopstory.com/
 
 - CPU
 - PPU 
+- APU
 - Cartridge loading
 - Mapper 0, 1, 2, 4
 
