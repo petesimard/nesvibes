@@ -355,7 +355,9 @@ export class PPU implements BusDevice {
         this.register_PPUCTRL = value;
 
         if ((oldValue & this.flags_PPUCTRL_NMI_ENABLE) == 0 && (value & this.flags_PPUCTRL_NMI_ENABLE) != 0) {
-            if (this.register_PPUSTATUS & this.flags_PPUSTATUS_VBLANK) {
+            // The VBL flag clears at 261/1; a write landing right before that dot already misses it
+            const vblClearing = this.current_scanline == 261 && this.current_dot == 1;
+            if ((this.register_PPUSTATUS & this.flags_PPUSTATUS_VBLANK) && !vblClearing) {
                 // Changing NMI enable from 0 to 1 while the vblank flag in PPUSTATUS is 1 will immediately trigger an NMI.
                 this.nes.NMI();
             }
@@ -465,9 +467,13 @@ export class PPU implements BusDevice {
         // Advance dot
         this.current_dot++;
 
-        // On odd frames with rendering enabled the pre-render line is one dot shorter (dot 340 is skipped)
+        // On odd frames with rendering enabled the pre-render line is one dot shorter (dot 340 is skipped).
+        // Whether rendering is enabled is latched a dot before the skip point.
+        if (this.current_dot == 339 && this.current_scanline == 261) {
+            this.oddFrameSkipRendering = this.isRenderingEnabled();
+        }
         const skipLastDot = this.current_dot == 340 && this.current_scanline == 261 &&
-            (this.frame_counter & 1) == 1 && this.isRenderingEnabled();
+            (this.frame_counter & 1) == 1 && this.oddFrameSkipRendering;
 
         if (this.current_dot == 341 || skipLastDot) {
             // End of scanline, move to next scanline
@@ -482,6 +488,8 @@ export class PPU implements BusDevice {
             }
         }
     }
+
+    private oddFrameSkipRendering: boolean = false;
 
     private incrementCoarseX() {
         if ((this.register_internal_V & 0x001F) == 31) { // if coarse X == 31

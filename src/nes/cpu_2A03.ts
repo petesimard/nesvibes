@@ -77,6 +77,12 @@ export class Cpu2A03 {
 
     // Set by KIL/JAM opcodes. The CPU stops until reset.
     halted: boolean = false;
+    // Interrupt state sampled as the current instruction's last cycle began. The 6502 polls
+    // interrupts before the final cycle, so an interrupt raised during that cycle waits for
+    // the next instruction.
+    nmiPolled: boolean = false;
+    nmiSampled: boolean = false; // NMI state latched by sampleNmi() earlier in this cycle
+    irqPolled: boolean = false;
     private hasWarnedHalt: boolean = false;
     private hasPoweredOn: boolean = false;
     // True if the current instruction always takes the extra indexed-addressing cycle (stores / RMW).
@@ -141,6 +147,9 @@ export class Cpu2A03 {
         this.irqPollOldIFlag = false;
         this.halted = false;
         this.hasWarnedHalt = false;
+        this.nmiPolled = false;
+        this.nmiSampled = false;
+        this.irqPolled = false;
         //this.register_PC = 0x6000;
         console.log(`Initial PC: ${numberToHex(this.register_PC)}`);
     }
@@ -158,6 +167,9 @@ export class Cpu2A03 {
 
         //console.log(`Clock Start PC: ${numberToHex(this.register_PC)}`);
         if (this.current_instruction != undefined) {
+            // If this turns out to be the instruction's last cycle, the poll uses this state
+            this.nmiPolled = this.nmiSampled;
+            this.irqPolled = this.irqLines != 0 || this.pendingIRQFlag;
             this.processCurrentInstruction();
             return;
         }
@@ -178,9 +190,9 @@ export class Cpu2A03 {
         // Interrupt poll. CLI/SEI/PLP: use I as it was before the last instruction changed it.
         const interruptDisabled = this.irqPollUseOldIFlag ? this.irqPollOldIFlag : (this.status_flags & this.FLAG_INTERRUPT) != 0;
         this.irqPollUseOldIFlag = false;
-        const irqActive = (this.irqLines != 0 || this.pendingIRQFlag) && !interruptDisabled;
+        const irqActive = this.irqPolled && (this.irqLines != 0 || this.pendingIRQFlag) && !interruptDisabled;
 
-        if (this.pendingNonMaskableInterruptFlag) {
+        if (this.pendingNonMaskableInterruptFlag && this.nmiPolled) {
             this.pendingNonMaskableInterruptFlag = false;
             this.currentInstructionAddressingMode = AddressingMode.Implied;
             this.currentInstructionIsStore = false;
@@ -1583,6 +1595,10 @@ export class Cpu2A03 {
     NMI() {
         this.pendingNonMaskableInterruptFlag = true;
         //console.log(`NMI triggered on ${numberToHex(this.register_PC)} Instruction: ${this.instructionResult.instructionMetadata?.name}`);
+    }
+
+    sampleNmi() {
+        this.nmiSampled = this.pendingNonMaskableInterruptFlag;
     }
 
     // Withdraw an NMI that hasn't been taken yet (PPU $2002 read race at VBL start).

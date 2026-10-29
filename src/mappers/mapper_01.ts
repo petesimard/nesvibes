@@ -17,19 +17,20 @@ export class Mapper01 extends Cartridge {
     prgRomBank: number = 0;
 
     initialize(): void {
-        this.reset();
-    }
-
-    reset() {
-        this.prgRomBankMode = 3;
+        // Power-on state
         this.chrRomBankMode = 0;
         this.chrRomBank0 = 0;
         this.chrRomBank1 = 0;
         this.prgRomBank = 0;
-        this.internal_shift_register = 0x10;
         this.nametableArrangement = 0;
+        this.reset();
+    }
 
-        console.log(`MMC1: Reset`);
+    // Writing a value with bit 7 set only clears the shift register and forces PRG mode 3
+    // (control |= $0C). Bank registers, CHR mode and mirroring are kept.
+    reset() {
+        this.prgRomBankMode = 3;
+        this.internal_shift_register = 0x10;
     }
 
 
@@ -57,8 +58,8 @@ export class Mapper01 extends Cartridge {
     private mapPPUAddress(address: number) {
 
         if (this.chrRomBankMode == 0) {
-            // 8 KiB mode
-            const bank = (this.chrRomBank0 * 0x2000);
+            // 8 KiB mode: low bit of the bank number is ignored
+            const bank = ((this.chrRomBank0 >> 1) * 0x2000);
             return bank + address;
         }
         else {
@@ -80,8 +81,8 @@ export class Mapper01 extends Cartridge {
         switch (this.prgRomBankMode) {
             case 0:
             case 1:
-                //switch 32 KB at $8000
-                const bank = this.prgRomBank * 0x8000;
+                //switch 32 KB at $8000 (low bit of the bank number is ignored)
+                const bank = (this.prgRomBank >> 1) * 0x8000;
                 return bank + (address - 0x8000);
             case 2:
                 // fix first bank at $8000 and switch 16 KB bank at $C000;
@@ -179,17 +180,8 @@ export class Mapper01 extends Cartridge {
         }
         else if (address >= 0xA000 && address <= 0xBFFF) {
             // CHR bank 0 
+            // Stored raw; the current CHR mode is applied when mapping (CHR size wraps via modulo)
             this.chrRomBank0 = shift_register;
-
-            if (this.header.chrRomSize == 1) {
-                // For carts with 8 KiB of CHR (be it ROM or RAM), MMC1 follows the common behavior of using only the low-order bits: the bank number is in effect ANDed with 1.
-                this.chrRomBank0 &= 0x1;
-
-            }
-
-            if (this.chrRomBankMode == 0) {
-                this.chrRomBank0 >>= 1;
-            }
 
             //console.log(`MMC1: CHR bank 0 updated: ${numberToHex(this.chrRomBank0)}`);
         }
@@ -201,11 +193,8 @@ export class Mapper01 extends Cartridge {
         }
         else if (address >= 0xE000 && address <= 0xFFFF) {
             // PRG ROM bank
+            // Stored raw; the current PRG mode is applied when mapping
             this.prgRomBank = (shift_register & 0xF);
-
-            if (this.prgRomBankMode < 2) {
-                this.prgRomBank >>= 1;
-            }
 
             //console.log(`MMC1: PRG ROM bank updated: ${numberToHex(this.prgRomBank)}`);
         }

@@ -130,7 +130,11 @@ export class Nes {
 
             this.ppu.clock();
 
-            if (i == 2) {
+            if (i == 0) {
+                // The CPU samples its NMI input early in the cycle (before the next two PPU dots)
+                this.cpu.sampleNmi();
+            }
+            else if (i == 2) {
                 this.cpu.clock();
                 if (APU_ENABLED) {
                     this.apu!.clock();
