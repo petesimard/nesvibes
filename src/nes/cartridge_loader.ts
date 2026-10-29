@@ -7,6 +7,8 @@ import { Mapper00 } from "../mappers/mapper_00";
 import { Mapper01 } from "../mappers/mapper_01";
 import { Mapper04 } from "../mappers/mapper_04";
 import { Mapper02 } from "../mappers/mapper_02";
+import { Mapper66 } from "../mappers/mapper_66";
+import { Mapper09 } from "../mappers/mapper_09";
 export class CartridgeLoader {
     constructor(private nes: Nes) {
         this.nes = nes;
@@ -33,6 +35,12 @@ export class CartridgeLoader {
                 break;
             case 4:
                 MapperClass = Mapper04;
+                break;
+            case 9:
+                MapperClass = Mapper09;
+                break;
+            case 66:
+                MapperClass = Mapper66;
                 break;
             default:
                 throw new Error(`Unsupported mapper number: ${header.mapperNumber}`);
@@ -84,6 +92,8 @@ export class CartridgeHeader {
     prgRamSize: number = 0;
     alternativeNametableLoyout: boolean = false;
     isHorizontalMirroring: boolean = false;
+    // flags6 bit 3: cartridge provides extra VRAM so all four nametables are distinct
+    fourScreen: boolean = false;
 
     constructor(private rom: Uint8Array) {
         // Load header
@@ -102,6 +112,7 @@ export class CartridgeHeader {
 
         this.isHorizontalMirroring = (flags6 & 0x01) == 0;
         this.alternativeNametableLoyout = (flags6 & 0x08) == 0;
+        this.fourScreen = (flags6 & 0x08) != 0;
 
         const flags7 = header[7];
 

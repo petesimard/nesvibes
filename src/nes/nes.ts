@@ -33,6 +33,11 @@ export class Nes {
     breakOnNmi: boolean = false;
     public overscan: boolean = false;
 
+    // Last value seen on the CPU data bus (returned for unmapped / write-only reads)
+    public openBus: number = 0;
+    private controllerStrobe: boolean = false;
+    private controllerShift: number[] = [0, 0];
+
     constructor(
         overscan: boolean,
         logger: (message: string) => void,
@@ -46,7 +51,6 @@ export class Nes {
         this.getControllerState = getControllerState;
         this.latchControllerStates = latchControllerStates;
         this.cpu = new Cpu2A03(this);
-        this.ram = new RAM(this, 2048);
         this.ram = new RAM(this, 2048);
         this.ppu = new PPU(this);
 
@@ -178,82 +182,103 @@ export class Nes {
     }
 
     read(address: number): number {
-        if (address >= 0x0000 && address <= 0x07FF) {
-            return this.ram.read(address);
+        const value = this.readBus(address);
+        this.openBus = value;
+        return value;
+    }
+
+    private readBus(address: number): number {
+        if (address < 0x2000) {
+            return this.ram.read(address & 0x07FF);
         }
-        else if (address >= 0x0800 && address <= 0x0FFF) {
-            return this.ram.read(address - 0x0800);
+        else if (address < 0x4000) {
+            return this.ppu.read(address);
         }
-        else if (address >= 0x1000 && address <= 0x17FF) {
-            return this.ram.read(address - 0x1000);
-        }
-        else if (address >= 0x1800 && address <= 0x1FFF) {
-            return this.ram.read(address - 0x1800);
+        else if (address == 0x4015) {
+            if (APU_ENABLED) {
+                return this.apu!.read(address) | (this.openBus & 0x20);
+            }
+            return this.openBus;
         }
         else if (address == 0x4016) {
-            const controllerState = this.getControllerState(0);
-            return controllerState;
+            return this.readController(0);
         }
         else if (address == 0x4017) {
-            return 0;// this.getControllerState(1);
+            return this.readController(1);
         }
-        else if (address >= 0x4020 && address <= 0xFFFF) {
+        else if (address < 0x4020) {
+            // Write-only APU/IO registers and the unused $4018-$401F test registers
+            return this.openBus;
+        }
+        else if (address <= 0xFFFF) {
             return this.cartridge!.read(address);
         }
         else if (address == this.CPU_BUSADDRESS_REGISTER_A) {
             return this.cpu.register_A;
         }
-        else if (address >= 0x2000 && address <= 0x3FFF) {
-            return this.ppu.read(address);
-        }
-        else if ((address >= 0x4000 && address <= 0x4013) || address >= 0x4015 || address <= 0x4017) {
-            if (APU_ENABLED) {
-                return this.apu!.read(address);
-            }
-        }
 
         console.error(`Read from unknown address: ${numberToHex(address)}`);
-        return 0;
+        return this.openBus;
+    }
+
+    // Standard controller: 8-bit shift register reloaded while the strobe ($4016 bit 0) is high.
+    // Reads return bit 0 of the register in D0 with open-bus upper bits; after 8 reads it returns 1.
+    private reloadControllers() {
+        this.latchControllerStates();
+        let state = 0;
+        for (let i = 0; i < 8; i++) {
+            state |= (this.getControllerState(0) & 1) << i;
+        }
+        this.controllerShift[0] = state;
+        this.controllerShift[1] = 0; // Controller 2: connected, no buttons pressed
+    }
+
+    private readController(controller: number): number {
+        if (this.controllerStrobe) {
+            this.reloadControllers();
+        }
+
+        const bit = this.controllerShift[controller] & 1;
+        if (!this.controllerStrobe) {
+            this.controllerShift[controller] = (this.controllerShift[controller] >> 1) | 0x80;
+        }
+        return 0x40 | bit;
     }
 
     write(address: number, value: number): void {
-        // if (address == 0x0) {
-        //     console.log(`Write to 0x00: ${numberToHex(value)} cpu: ${numberToHex(this.cpu.instructionResult.register_PC)}`);
-        // }
+        this.openBus = value;
 
-        if (address >= 0x0000 && address <= 0x07FF) {
-            this.ram.write(address, value);
+        if (address < 0x2000) {
+            this.ram.write(address & 0x07FF, value);
         }
-        else if (address >= 0x0800 && address <= 0x0FFF) {
-            this.ram.write(address - 0x0800, value);
-        }
-        else if (address >= 0x1000 && address <= 0x17FF) {
-            this.ram.write(address - 0x1000, value);
-        }
-        else if (address >= 0x1800 && address <= 0x1FFF) {
-            this.ram.write(address - 0x1800, value);
-        }
-        else if (address == 0x4016) {
-            if ((value & 1) == 0) {
-                this.latchControllerStates();
-            }
-        }
-        else if (address >= 0x4020 && address <= 0xFFFF) {
-            this.cartridge!.write(address, value);
-        }
-        else if (address == this.CPU_BUSADDRESS_REGISTER_A) {
-            this.cpu.register_A = value;
-        }
-        else if (address >= 0x2000 && address <= 0x3FFF) {
+        else if (address < 0x4000) {
             this.ppu.write(address, value);
         }
         else if (address == 0x4014) {
             this.cpu.setOAMDMA(value);
         }
-        else if ((address >= 0x4000 && address <= 0x4013) || address >= 0x4015 || address <= 0x4017) {
+        else if (address == 0x4016) {
+            const strobe = (value & 1) != 0;
+            if (strobe || this.controllerStrobe) {
+                // Reload while high; the state at the high->low transition is what gets shifted out
+                this.reloadControllers();
+            }
+            this.controllerStrobe = strobe;
+        }
+        else if (address <= 0x4017) {
+            // $4000-$4013, $4015, $4017
             if (APU_ENABLED) {
                 this.apu!.write(address, value);
             }
+        }
+        else if (address < 0x4020) {
+            // $4018-$401F: unused, ignore
+        }
+        else if (address <= 0xFFFF) {
+            this.cartridge!.write(address, value);
+        }
+        else if (address == this.CPU_BUSADDRESS_REGISTER_A) {
+            this.cpu.register_A = value;
         }
         else {
             throw new Error(`Write to unknown address: ${numberToHex(address)}`);

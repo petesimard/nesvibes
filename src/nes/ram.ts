@@ -15,12 +15,6 @@ export class RAM implements BusDevice {
     }
 
     write(address: number, value: number): void {
-        if (value < 0 || value > 255) {
-            throw new Error(`Invalid value ${value} at address ${address}`);
-        }
-
-        //console.log(`write(${numberToHex(address)},${numberToHex(value)})`);
-
-        this.memory[address] = value;
+        this.memory[address] = value & 0xFF;
     }
 }

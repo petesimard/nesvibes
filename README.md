@@ -12,7 +12,7 @@ http://vibes.hopstory.com/
 - PPU 
 - APU
 - Cartridge loading
-- Mapper 0, 1, 2, 4
+- Mapper 0, 1, 2, 4, 9, 66
 
 # What's not working
 

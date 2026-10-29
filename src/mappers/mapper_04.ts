@@ -1,12 +1,14 @@
 import { numberToHex } from "../emulator/utils";
 import { Cartridge } from "../nes/cartridge";
+import { Cpu2A03 } from "../nes/cpu_2A03";
 
 export class Mapper04 extends Cartridge {
     bankRegisterToUpdate: number = 0;
     prgRomBankMode: number = 0;
     chrInversion: number = 0;
     nametableArrangement: number = 0;
-    bankRegisters: number[] = [];
+    // Note: field initializers run after the base constructor (which calls initialize()).
+    bankRegisters: number[] = new Array(8).fill(0);
     irqCounterReload: number = 0;
     irqCounter: number = 0;
     irqPendingReload: boolean = false;
@@ -20,14 +22,22 @@ export class Mapper04 extends Cartridge {
         }
     }
 
+    // Boards without CHR ROM use 8KB of CHR RAM
+    private get chrMemory(): Uint8Array {
+        return this.header.chrRomSize == 0 ? this.characterRam : this.characterRom;
+    }
+
     ppu_read(address: number): number {
         address = this.mapPPUAddress(address);
-        return this.characterRom[address];
+        return this.chrMemory[address];
     }
 
     ppu_write(address: number, value: number): void {
+        if (this.header.chrRomSize != 0) {
+            return; // CHR ROM is read-only
+        }
         address = this.mapPPUAddress(address);
-        this.characterRom[address] = value;
+        this.characterRam[address] = value;
     }
 
 
@@ -41,7 +51,8 @@ export class Mapper04 extends Cartridge {
             return this.programRom[address];
         }
 
-        throw new Error(`Read from unknown cartridge address: ${numberToHex(address)}`);
+        // $4020-$5FFF: nothing mapped, open bus
+        return this.nes.openBus;
     }
 
     write(address: number, value: number): void {
@@ -90,9 +101,9 @@ export class Mapper04 extends Cartridge {
             this.irqPendingReload = true;
         }
         else if (address >= 0xE000 && address <= 0xFFFE && isEven) {
-            // IRQ Disable
+            // IRQ Disable + acknowledge pending IRQ
             this.irqEnabled = false;
-            // todo acknowledge pending irq
+            this.nes.getCpu().setIrqLine(Cpu2A03.IRQ_SOURCE_MAPPER, false);
         }
         else if (address >= 0xE001 && address <= 0xFFFF && !isEven) {
             // IRQ Enable
@@ -167,7 +178,7 @@ export class Mapper04 extends Cartridge {
 
         let offset = address - baseAddress;
 
-        let finalAddress = (bankAddress + offset) % this.characterRom.length;
+        let finalAddress = (bankAddress + offset) % this.chrMemory.length;
 
         return finalAddress;
     }
@@ -241,8 +252,7 @@ export class Mapper04 extends Cartridge {
     }
 
     onA12Clock() {
-        let isCounter0 = this.irqCounter <= 0;
-        if (isCounter0 || this.irqPendingReload) {
+        if (this.irqCounter == 0 || this.irqPendingReload) {
             this.irqCounter = this.irqCounterReload;
             this.irqPendingReload = false;
         }
@@ -250,8 +260,9 @@ export class Mapper04 extends Cartridge {
             this.irqCounter--;
         }
 
-        if (this.irqCounter <= 0 && this.irqEnabled) {
-            this.nes.getCpu().IRQ();
+        if (this.irqCounter == 0 && this.irqEnabled) {
+            // Held asserted until acknowledged by a write to $E000
+            this.nes.getCpu().setIrqLine(Cpu2A03.IRQ_SOURCE_MAPPER, true);
         }
     }
 }

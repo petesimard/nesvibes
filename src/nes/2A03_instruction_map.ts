@@ -262,7 +262,12 @@ instructionMap[0xF4] = { name: '&NOP', mode: AddressingMode.Immediate, cycles: 4
 
 instructionMap[0x0C] = { name: '!NOP', mode: AddressingMode.Immediate, cycles: 4, instruction_length: 3 }; // Unofficial
 
-instructionMap[0x80] = { name: '+NOP', mode: AddressingMode.Immediate, cycles: 4, instruction_length: 3 }; // Unofficial
+// NOP #imm (2 bytes, 2 cycles)
+instructionMap[0x80] = { name: '+NOP', mode: AddressingMode.Immediate, cycles: 2, instruction_length: 2 }; // Unofficial
+instructionMap[0x82] = { name: '+NOP', mode: AddressingMode.Immediate, cycles: 2, instruction_length: 2 }; // Unofficial
+instructionMap[0x89] = { name: '+NOP', mode: AddressingMode.Immediate, cycles: 2, instruction_length: 2 }; // Unofficial
+instructionMap[0xC2] = { name: '+NOP', mode: AddressingMode.Immediate, cycles: 2, instruction_length: 2 }; // Unofficial
+instructionMap[0xE2] = { name: '+NOP', mode: AddressingMode.Immediate, cycles: 2, instruction_length: 2 }; // Unofficial
 
 instructionMap[0x1C] = { name: '@NOP', mode: AddressingMode.AbsoluteX, cycles: 5, instruction_length: 3, checkForOopsCycle: true }; // Unofficial
 instructionMap[0x3C] = { name: '@NOP', mode: AddressingMode.AbsoluteX, cycles: 5, instruction_length: 3, checkForOopsCycle: true }; // Unofficial
@@ -332,6 +337,28 @@ instructionMap[0x7F] = { name: 'RRA', mode: AddressingMode.AbsoluteX, cycles: 7,
 instructionMap[0x7B] = { name: 'RRA', mode: AddressingMode.AbsoluteY, cycles: 7, instruction_length: 3 }; // Unofficial
 instructionMap[0x63] = { name: 'RRA', mode: AddressingMode.IndirectX, cycles: 8, instruction_length: 2 }; // Unofficial
 instructionMap[0x73] = { name: 'RRA', mode: AddressingMode.IndirectY, cycles: 8, instruction_length: 2 }; // Unofficial
+
+// Immediate unofficial opcodes
+instructionMap[0x0B] = { name: 'ANC', mode: AddressingMode.Immediate, cycles: 2, instruction_length: 2 }; // Unofficial
+instructionMap[0x2B] = { name: 'ANC', mode: AddressingMode.Immediate, cycles: 2, instruction_length: 2 }; // Unofficial
+instructionMap[0x4B] = { name: 'ALR', mode: AddressingMode.Immediate, cycles: 2, instruction_length: 2 }; // Unofficial
+instructionMap[0x6B] = { name: 'ARR', mode: AddressingMode.Immediate, cycles: 2, instruction_length: 2 }; // Unofficial
+instructionMap[0x8B] = { name: 'XAA', mode: AddressingMode.Immediate, cycles: 2, instruction_length: 2 }; // Unofficial (unstable)
+instructionMap[0xAB] = { name: 'LXA', mode: AddressingMode.Immediate, cycles: 2, instruction_length: 2 }; // Unofficial (unstable)
+instructionMap[0xCB] = { name: 'AXS', mode: AddressingMode.Immediate, cycles: 2, instruction_length: 2 }; // Unofficial
+
+// Unstable high-byte stores and LAS
+instructionMap[0x9C] = { name: 'SHY', mode: AddressingMode.AbsoluteX, cycles: 5, instruction_length: 3 }; // Unofficial
+instructionMap[0x9E] = { name: 'SHX', mode: AddressingMode.AbsoluteY, cycles: 5, instruction_length: 3 }; // Unofficial
+instructionMap[0x9F] = { name: 'AHX', mode: AddressingMode.AbsoluteY, cycles: 5, instruction_length: 3 }; // Unofficial
+instructionMap[0x93] = { name: 'AHX', mode: AddressingMode.IndirectY, cycles: 6, instruction_length: 2 }; // Unofficial
+instructionMap[0x9B] = { name: 'TAS', mode: AddressingMode.AbsoluteY, cycles: 5, instruction_length: 3 }; // Unofficial
+instructionMap[0xBB] = { name: 'LAS', mode: AddressingMode.AbsoluteY, cycles: 4, instruction_length: 3, checkForOopsCycle: true }; // Unofficial
+
+// KIL / JAM
+for (const opcode of [0x02, 0x12, 0x22, 0x32, 0x42, 0x52, 0x62, 0x72, 0x92, 0xB2, 0xD2, 0xF2]) {
+    instructionMap[opcode] = { name: 'KIL', mode: AddressingMode.Implied, cycles: 2, instruction_length: 1 }; // Unofficial
+}
 
 instructionMap[0x100] = { name: 'NMI', mode: AddressingMode.Implied, cycles: 2, instruction_length: 2 };
 instructionMap[0x101] = { name: 'IRQ', mode: AddressingMode.Implied, cycles: 2, instruction_length: 2 };

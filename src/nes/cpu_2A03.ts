@@ -10,6 +10,14 @@ const DEBUG_BREAKPOINT_CYCLE: number | undefined = undefined;
 
 const LOG_INSTRUCTIONS: boolean = false;
 
+// Instructions that always take the extra indexed-addressing cycle (writes and read-modify-writes).
+const STORE_INSTRUCTIONS = new Set<string>([
+    "STA", "STX", "STY",
+    "ASL", "LSR", "ROL", "ROR", "INC", "DEC",
+    "DCP", "ISB", "SLO", "SRE", "RLA", "RRA",
+    "SHY", "SHX", "AHX", "TAS",
+]);
+
 export class InstructionResult {
     cycles: number = 0;
     instructionMetadata: InstructionMetadata | undefined = undefined;
@@ -46,24 +54,44 @@ export class Cpu2A03 {
     FLAG_ZERO: number = 1 << 1;
     FLAG_INTERRUPT: number = 1 << 2;
     FLAG_DECIMAL: number = 1 << 3;
-    FLAG_UNUSED: number = 1 << 4;
-    FLAG_BREAK: number = 1 << 5;
+    FLAG_BREAK: number = 1 << 4;
+    FLAG_UNUSED: number = 1 << 5;
     FLAG_OVERFLOW: number = 1 << 6;
     FLAG_NEGATIVE: number = 1 << 7;
 
     pendingNonMaskableInterruptFlag: boolean = false;
+    // One-shot IRQ request (legacy IRQ() shim). Prefer setIrqLine().
     pendingIRQFlag: boolean = false;
+
+    // Level-triggered IRQ line: one bit per source. The CPU takes an IRQ at an instruction
+    // boundary while any bit is set and the I flag is clear.
+    static readonly IRQ_SOURCE_MAPPER = 1 << 0;
+    static readonly IRQ_SOURCE_APU_FRAME = 1 << 1;
+    static readonly IRQ_SOURCE_APU_DMC = 1 << 2;
+    irqLines: number = 0;
+
+    // CLI/SEI/PLP change I after the interrupt poll of their last cycle, so the poll at the next
+    // instruction boundary must see the I value from before the change.
+    irqPollUseOldIFlag: boolean = false;
+    irqPollOldIFlag: boolean = false;
+
+    // Set by KIL/JAM opcodes. The CPU stops until reset.
+    halted: boolean = false;
+    private hasWarnedHalt: boolean = false;
+    private hasPoweredOn: boolean = false;
+    // True if the current instruction always takes the extra indexed-addressing cycle (stores / RMW).
+    private currentInstructionIsStore: boolean = false;
+    private dmaAlignCycles: number = 0;
 
     STACK_START: number = 0x0100;
 
-    status_flags: number = this.FLAG_INTERRUPT;
+    status_flags: number = this.FLAG_INTERRUPT | this.FLAG_UNUSED;
     current_instruction: Instruction | undefined = undefined;
     currentInstructionCycle: number = 0;
     currentInstructionAddressingMode: AddressingMode = AddressingMode.Implied;
     currentInstructionAddress: number | undefined = undefined;
     addressRegister: number = 0x00;
     instructionResult: InstructionResult = new InstructionResult();
-    pendingInterruptDisableFlag: boolean | undefined = undefined;
     debug_break_on_next_instruction: boolean = false;
     currentInstructionAddressFunction: AddressFunction | undefined = undefined;
     tempAddressArg: number = 0x00;
@@ -82,17 +110,37 @@ export class Cpu2A03 {
     }
 
     onReset() {
-        this.status_flags = this.FLAG_INTERRUPT;
+        if (!this.hasPoweredOn) {
+            // Power-on state
+            this.hasPoweredOn = true;
+            this.status_flags = this.FLAG_INTERRUPT | this.FLAG_UNUSED;
+            this.register_X = 0x00;
+            this.register_Y = 0x00;
+            this.register_SP = 0xFD;
+            this.register_A = 0x00;
+        }
+        else {
+            // Soft reset: A/X/Y kept, SP decremented by 3 (suppressed pushes), I set
+            this.register_SP = (this.register_SP - 3) & 0xFF;
+            this.status_flags = (this.status_flags | this.FLAG_INTERRUPT | this.FLAG_UNUSED) & ~this.FLAG_BREAK;
+        }
         this.addressRegister = 0x00;
-        this.register_X = 0x00;
-        this.register_Y = 0x00;
-        this.register_SP = 0xFD;
-        this.register_A = 0x00;
         this.register_PC = this.nes.read16(0xFFFC);
         this.current_instruction = undefined;
+        this.currentInstructionAddressFunction = undefined;
+        this.currentInstructionCycle = 0;
+        this.currentInstructionIsStore = false;
         this.cpuCycles = 0;
         this.hasOopsCycles = false;
         this.register_OAMDMA = undefined;
+        this.oamDataCount = 0;
+        this.pendingNonMaskableInterruptFlag = false;
+        this.pendingIRQFlag = false;
+        this.irqLines = 0;
+        this.irqPollUseOldIFlag = false;
+        this.irqPollOldIFlag = false;
+        this.halted = false;
+        this.hasWarnedHalt = false;
         //this.register_PC = 0x6000;
         console.log(`Initial PC: ${numberToHex(this.register_PC)}`);
     }
@@ -104,37 +152,45 @@ export class Cpu2A03 {
             return;
         }
 
+        if (this.halted) {
+            return;
+        }
+
         //console.log(`Clock Start PC: ${numberToHex(this.register_PC)}`);
         if (this.current_instruction != undefined) {
             this.processCurrentInstruction();
             return;
         }
 
-        if (this.pendingInterruptDisableFlag != undefined) {
-            this.toggleFlag(this.FLAG_INTERRUPT, this.pendingInterruptDisableFlag);
-            this.pendingInterruptDisableFlag = undefined;
+        // Instruction boundary
+        if (this.register_OAMDMA != undefined) {
+            // OAM DMA halts the CPU right after the $4014 write: 1 halt cycle (+1 alignment cycle
+            // when starting on an odd CPU cycle) then 256 read/write pairs = 513/514 cycles.
+            this.dmaAlignCycles = (this.cpuCycles & 1) != 0 ? 1 : 0;
+            this.currentInstructionAddressingMode = AddressingMode.Implied;
+            this.currentInstructionIsStore = false;
+            this.setInstruction(this.dmaInstruction);
+            this.currentInstructionCycle = 0;
+            this.processCurrentInstruction();
+            return;
         }
 
-        if (this.pendingIRQFlag && this.status_flags & this.FLAG_INTERRUPT) {
-            this.pendingIRQFlag = false;
-        }
-
+        // Interrupt poll. CLI/SEI/PLP: use I as it was before the last instruction changed it.
+        const interruptDisabled = this.irqPollUseOldIFlag ? this.irqPollOldIFlag : (this.status_flags & this.FLAG_INTERRUPT) != 0;
+        this.irqPollUseOldIFlag = false;
+        const irqActive = (this.irqLines != 0 || this.pendingIRQFlag) && !interruptDisabled;
 
         if (this.pendingNonMaskableInterruptFlag) {
             this.pendingNonMaskableInterruptFlag = false;
-            this.pendingIRQFlag = false;
             this.currentInstructionAddressingMode = AddressingMode.Implied;
+            this.currentInstructionIsStore = false;
             this.setInstruction(this.nmiInstruction);
             this.currentInstructionCycle = 0;
         }
-        else if (this.register_OAMDMA != undefined) {
-            this.currentInstructionAddressingMode = AddressingMode.Implied;
-            this.setInstruction(this.dmaInstruction);
-            this.currentInstructionCycle = 0;
-        }
-        else if (this.pendingIRQFlag) {
+        else if (irqActive) {
             this.pendingIRQFlag = false;
             this.currentInstructionAddressingMode = AddressingMode.Implied;
+            this.currentInstructionIsStore = false;
             this.setInstruction(this.irqInstruction);
             this.currentInstructionCycle = 0;
         }
@@ -146,7 +202,6 @@ export class Cpu2A03 {
             //console.log(`Instruction: ${numberToHex(instructionOpCode)}`);
             const newInstruction = this.getInstructionFunc(instructionOpCode);
             this.setInstruction(newInstruction);
-            this.toggleFlag(this.FLAG_BREAK, true);
             // Advance PC to next instruction
             this.advancePC();
         }
@@ -193,7 +248,7 @@ export class Cpu2A03 {
     }
 
     private advancePC() {
-        this.register_PC++;
+        this.register_PC = (this.register_PC + 1) & 0xFFFF;
     }
 
     public getCycles(): number {
@@ -254,227 +309,259 @@ export class Cpu2A03 {
 
 
     ExecuteOAMDMA(): boolean {
-        if (this.currentInstructionCycle < 2 || this.currentInstructionCycle % 2 != 0) {
+        // Cycle 0 is the halt cycle (+ optional alignment cycle), then alternating get/put cycles.
+        const firstGetCycle = 1 + this.dmaAlignCycles;
+        const cycle = this.currentInstructionCycle - firstGetCycle;
+        if (cycle < 0) {
             return false;
         }
 
-        let baseAddress = this.register_OAMDMA!;
+        if (cycle % 2 != 0) {
+            // Put cycle. The DMA ends with the put of the 256th byte.
+            return cycle >= 511;
+        }
 
-        const address = baseAddress + this.oamDataCount;
+        const address = this.register_OAMDMA! + this.oamDataCount;
         const value = this.nes.read(address);
         this.nes.write(this.nes.getPpu().register_address_OAMDATA, value);
 
-        if (this.oamDataCount < 255) {
-            this.oamDataCount++;
-            return false;
+        this.oamDataCount++;
+        if (this.oamDataCount >= 256) {
+            this.register_OAMDMA = undefined;
         }
-
-        this.register_OAMDMA = undefined;
-        return true;
+        return false;
     }
 
-    ExecuteNMI(): boolean {
-        const currentPC = this.register_PC;
-
-        if (this.currentInstructionCycle <= 1)
-            return false;
-
-
-        if (this.currentInstructionCycle == 2) {
-            this.pushStack(currentPC >> 8);
+    // Shared 7-cycle interrupt sequence (cycle 0 = the replaced opcode fetch).
+    private executeInterruptSequence(vector: number, pushedFlags: number, cycle: number): boolean {
+        if (cycle == 2) {
+            this.pushStack((this.register_PC >> 8) & 0xFF);
             return false;
         }
 
-
-        if (this.currentInstructionCycle == 3) {
-            this.pushStack(currentPC & 0xFF);
+        if (cycle == 3) {
+            this.pushStack(this.register_PC & 0xFF);
             return false;
         }
 
-
-        if (this.currentInstructionCycle == 4) {
-            this.pushStack(this.status_flags & ~this.FLAG_BREAK);
+        if (cycle == 4) {
+            // NMI hijack: an NMI arriving before the vector fetch takes over the vector.
+            if (vector != 0xFFFA && this.pendingNonMaskableInterruptFlag) {
+                this.pendingNonMaskableInterruptFlag = false;
+                this.interruptVector = 0xFFFA;
+            }
+            else {
+                this.interruptVector = vector;
+            }
+            this.pushStack(pushedFlags);
             return false;
         }
 
-        if (this.currentInstructionCycle == 5) {
-            this.register_PC = this.nes.read16(0xFFFA);
+        if (cycle == 5) {
             this.toggleFlag(this.FLAG_INTERRUPT, true);
             return false;
         }
 
-        return true;
+        if (cycle == 6) {
+            this.register_PC = this.nes.read16(this.interruptVector);
+            return true;
+        }
+
+        return false;
     }
 
-    // BRK - Break
+    interruptVector: number = 0xFFFE;
+
+    ExecuteNMI(): boolean {
+        const flags = (this.status_flags & ~this.FLAG_BREAK) | this.FLAG_UNUSED;
+        return this.executeInterruptSequence(0xFFFA, flags, this.currentInstructionCycle);
+    }
+
+    // BRK - Break. Opcode fetch is cycle 1, this function runs for cycles 2..7.
     processInstruction_BRK(): boolean {
-        this.pushStack16(this.register_PC + 2);
-        //console.log(`BRK ${numberToHex(this.register_PC + 2)} ${numberToHex(this.status_flags)}`);
+        if (this.currentInstructionCycle == 0) {
+            // Read (and skip) the padding byte; return address is opcode + 2
+            this.nes.read(this.register_PC);
+            this.advancePC();
+            return false;
+        }
 
-        this.pushStack(this.status_flags | this.FLAG_BREAK);
-        this.register_PC = this.nes.read16(0xFFFE);
-
-        this.toggleFlag(this.FLAG_INTERRUPT, true);
-        return true;
+        const flags = this.status_flags | this.FLAG_BREAK | this.FLAG_UNUSED;
+        return this.executeInterruptSequence(0xFFFE, flags, this.currentInstructionCycle + 1);
     }
 
     // IRQ - Interrupt Request
     ExecuteIRQ(): boolean {
-        if (this.currentInstructionCycle == 0) {
-            const currentPC = this.register_PC;
-            this.toggleFlag(this.FLAG_INTERRUPT, true);
-            this.pushStack16(currentPC);
-        }
+        // Push P as it was (I not yet set), then set I.
+        const flags = (this.status_flags & ~this.FLAG_BREAK) | this.FLAG_UNUSED;
+        return this.executeInterruptSequence(0xFFFE, flags, this.currentInstructionCycle);
+    }
 
-
-        if (this.currentInstructionCycle == 1) {
-            this.pushStack(this.status_flags & ~this.FLAG_BREAK);
-            return false;
-        }
-
-        if (this.currentInstructionCycle == 2) {
-            this.register_PC = this.nes.read16(0xFFFE);
-            return false;
-        }
-
-
-        if (this.currentInstructionCycle <= 10)
-            return false;
-
-
+    // ANC - AND immediate, then C = N
+    processInstruction_ANC(): boolean {
+        this.register_A &= this.loadValue();
+        this.setZN(this.register_A);
+        this.toggleFlag(this.FLAG_CARRY, (this.register_A & 0x80) != 0);
         return true;
     }
 
-    // RRA - Rotate Right and Accumulator
-    processInstruction_RRA(): boolean {
-        if (this.currentInstructionCycle <= 1)
-            return false;
-
-        let address = this.currentInstructionAddress;
-        let value = this.nes.read(address!);
-
-        this.nes.write(address!, value); // Read, modify, write back
-
-        const result = (value >> 1) | ((this.status_flags & this.FLAG_CARRY) != 0 ? 1 << 7 : 0);
-        this.nes.write(address!, result);
-
-        var rorCarry = (value & 1) != 0;
-
-        // ADC
-        var adc_result = this.register_A + result + (rorCarry ? 1 : 0);
-
-        this.toggleFlag(this.FLAG_CARRY, adc_result > 0xFF);
-        this.toggleFlag(this.FLAG_ZERO, (adc_result & 0xFF) == 0);
-        this.toggleFlag(this.FLAG_OVERFLOW, ((adc_result ^ this.register_A) & (adc_result ^ result) & 0x80) != 0);
-        this.toggleFlag(this.FLAG_NEGATIVE, (adc_result & (1 << 7)) != 0);
-
-        this.register_A = adc_result & 0xFF;
-        return true;
-    }
-
-    // SRE - Shift Right and Logical OR
-    processInstruction_SRE(): boolean {
-        if (this.currentInstructionCycle <= 1)
-            return false;
-
-        let address = this.currentInstructionAddress;
-        let value = this.nes.read(address!);
-
-
-        this.nes.write(address!, value); // Read, modify, write back
-
-        const result = (value >> 1);
-        this.nes.write(address!, result);
-
-        this.register_A = this.register_A ^ result;
-
+    // ALR (ASR) - AND immediate, then LSR A
+    processInstruction_ALR(): boolean {
+        const value = this.register_A & this.loadValue();
         this.toggleFlag(this.FLAG_CARRY, (value & 1) != 0);
-        this.toggleFlag(this.FLAG_ZERO, this.register_A == 0);
-        this.toggleFlag(this.FLAG_NEGATIVE, (this.register_A & (1 << 7)) != 0);
+        this.register_A = value >> 1;
+        this.setZN(this.register_A);
         return true;
     }
 
-    // RLA - Rotate Left and Logical AND
+    // ARR - AND immediate, then ROR A; C = bit 6, V = bit 6 ^ bit 5
+    processInstruction_ARR(): boolean {
+        const value = this.register_A & this.loadValue();
+        this.register_A = (value >> 1) | ((this.status_flags & this.FLAG_CARRY) != 0 ? 0x80 : 0);
+        this.setZN(this.register_A);
+        this.toggleFlag(this.FLAG_CARRY, (this.register_A & 0x40) != 0);
+        this.toggleFlag(this.FLAG_OVERFLOW, (((this.register_A >> 6) ^ (this.register_A >> 5)) & 1) != 0);
+        return true;
+    }
+
+    // XAA (ANE) - unstable: A = (A | magic) & X & imm
+    processInstruction_XAA(): boolean {
+        this.register_A = (this.register_A | 0xEE) & this.register_X & this.loadValue();
+        this.setZN(this.register_A);
+        return true;
+    }
+
+    // LXA (LAX #imm) - unstable; most emulators use A = X = imm
+    processInstruction_LXA(): boolean {
+        const value = this.loadValue();
+        this.register_A = value;
+        this.register_X = value;
+        this.setZN(value);
+        return true;
+    }
+
+    // AXS (SBX) - X = (A & X) - imm, flags like CMP
+    processInstruction_AXS(): boolean {
+        const value = this.loadValue();
+        const ax = this.register_A & this.register_X;
+        this.compare(ax, value);
+        this.register_X = (ax - value) & 0xFF;
+        return true;
+    }
+
+    // LAS - A = X = SP = mem & SP
+    processInstruction_LAS(): boolean {
+        const value = this.loadValue() & this.register_SP;
+        this.register_A = value;
+        this.register_X = value;
+        this.register_SP = value;
+        this.setZN(value);
+        return true;
+    }
+
+    // SHY / SHX / AHX (SHA) / TAS: store value & (base high byte + 1). On a page cross the
+    // high byte of the target address is replaced by the stored value.
+    private storeHighAnd(value: number, index: number) {
+        const finalAddress = this.currentInstructionAddress!;
+        const baseAddress = (finalAddress - index) & 0xFFFF;
+        const result = value & (((baseAddress >> 8) + 1) & 0xFF);
+        let address = finalAddress;
+        if ((baseAddress & 0xFF00) != (finalAddress & 0xFF00)) {
+            address = (result << 8) | (finalAddress & 0xFF);
+        }
+        this.nes.write(address, result);
+    }
+
+    processInstruction_SHY(): boolean {
+        this.storeHighAnd(this.register_Y, this.register_X);
+        return true;
+    }
+
+    processInstruction_SHX(): boolean {
+        this.storeHighAnd(this.register_X, this.register_Y);
+        return true;
+    }
+
+    processInstruction_AHX(): boolean {
+        this.storeHighAnd(this.register_A & this.register_X, this.register_Y);
+        return true;
+    }
+
+    processInstruction_TAS(): boolean {
+        this.register_SP = this.register_A & this.register_X;
+        this.storeHighAnd(this.register_SP, this.register_Y);
+        return true;
+    }
+
+    // KIL (JAM) - halts the CPU until reset
+    processInstruction_KIL(): boolean {
+        this.halted = true;
+        if (!this.hasWarnedHalt) {
+            this.hasWarnedHalt = true;
+            console.warn(`CPU halted by KIL/JAM opcode at ${numberToHex((this.register_PC - 1) & 0xFFFF)}`);
+        }
+        return true;
+    }
+
+    // RRA - Rotate Right then Add with Carry
+    processInstruction_RRA(): boolean {
+        return this.readModifyWrite((value) => {
+            const result = (value >> 1) | ((this.status_flags & this.FLAG_CARRY) != 0 ? 0x80 : 0);
+            this.toggleFlag(this.FLAG_CARRY, (value & 1) != 0);
+            this.addWithCarry(result);
+            return result;
+        });
+    }
+
+    // SRE - Shift Right then EOR
+    processInstruction_SRE(): boolean {
+        return this.readModifyWrite((value) => {
+            const result = value >> 1;
+            this.register_A ^= result;
+            this.toggleFlag(this.FLAG_CARRY, (value & 1) != 0);
+            this.setZN(this.register_A);
+            return result;
+        });
+    }
+
+    // RLA - Rotate Left then AND
     processInstruction_RLA(): boolean {
-        if (this.currentInstructionCycle <= 1)
-            return false;
-
-        let address = this.currentInstructionAddress;
-        const value = this.nes.read(address!);
-
-        const newValue = ((value << 1) | ((this.status_flags & this.FLAG_CARRY) != 0 ? 1 : 0)) & 0xFF;
-        this.nes.write(address!, newValue);
-
-        const result = this.register_A & newValue;
-        this.register_A = result & 0xFF;
-
-        this.toggleFlag(this.FLAG_CARRY, (value & (1 << 7)) != 0);
-        this.toggleFlag(this.FLAG_ZERO, this.register_A == 0);
-        this.toggleFlag(this.FLAG_NEGATIVE, (this.register_A & (1 << 7)) != 0);
-        return true;
+        return this.readModifyWrite((value) => {
+            const result = ((value << 1) | ((this.status_flags & this.FLAG_CARRY) != 0 ? 1 : 0)) & 0xFF;
+            this.register_A &= result;
+            this.toggleFlag(this.FLAG_CARRY, (value & 0x80) != 0);
+            this.setZN(this.register_A);
+            return result;
+        });
     }
 
-    // SLO - Shift Left and Logical OR
+    // SLO - Shift Left then OR
     processInstruction_SLO(): boolean {
-        if (this.currentInstructionCycle <= 1)
-            return false;
-
-        let address = this.currentInstructionAddress;
-        const value = this.nes.read(address!);
-        const newValue = (value << 1) & 0xFF;
-        this.nes.write(address!, newValue);
-
-        const result = this.register_A | newValue;
-        this.register_A = result & 0xFF;
-
-        this.toggleFlag(this.FLAG_CARRY, (value & (1 << 7)) != 0);
-        this.toggleFlag(this.FLAG_ZERO, this.register_A == 0);
-        this.toggleFlag(this.FLAG_NEGATIVE, (this.register_A & (1 << 7)) != 0);
-        return true;
+        return this.readModifyWrite((value) => {
+            const result = (value << 1) & 0xFF;
+            this.register_A |= result;
+            this.toggleFlag(this.FLAG_CARRY, (value & 0x80) != 0);
+            this.setZN(this.register_A);
+            return result;
+        });
     }
 
-    // ISB - Increment Memory and Subtract
+    // ISB - Increment Memory then Subtract with Carry
     processInstruction_ISB(): boolean {
-        if (this.currentInstructionCycle <= 1)
-            return false;
-
-        let address = this.currentInstructionAddress;
-
-        let value = this.nes.read(address!);
-
-        value++;
-        value = value & 0xFF;
-        this.nes.write(address!, value);
-
-        var result = this.register_A + ~value + (this.status_flags & this.FLAG_CARRY ? 1 : 0);
-
-        this.toggleFlag(this.FLAG_CARRY, (~result < 0x00));
-        this.toggleFlag(this.FLAG_ZERO, result == 0);
-        this.toggleFlag(this.FLAG_OVERFLOW, ((result ^ this.register_A) & (result ^ ~value) & 0x80) != 0);
-        this.toggleFlag(this.FLAG_NEGATIVE, (result & (1 << 7)) != 0);
-
-        this.register_A = result & 0xFF;
-        return true;
+        return this.readModifyWrite((value) => {
+            const result = (value + 1) & 0xFF;
+            this.addWithCarry(result ^ 0xFF);
+            return result;
+        });
     }
 
-    // DCP - Decrement Memory and Compare
+    // DCP - Decrement Memory then Compare
     processInstruction_DCP(): boolean {
-        if (this.currentInstructionCycle <= 1)
-            return false;
-
-        let address = this.currentInstructionAddress;
-        let value = this.nes.read(address!);
-
-        value--;
-        value = value & 0xFF;
-        this.nes.write(address!, value);
-
-        const aValue = this.register_A - value;
-
-        this.toggleFlag(this.FLAG_CARRY, ~aValue < 0);
-        this.toggleFlag(this.FLAG_ZERO, aValue == 0);
-        this.toggleFlag(this.FLAG_NEGATIVE, (aValue & (1 << 7)) != 0);
-        return true;
+        return this.readModifyWrite((value) => {
+            const result = (value - 1) & 0xFF;
+            this.compare(this.register_A, result);
+            return result;
+        });
     }
 
     // SAX - Store Accumulator and Index X
@@ -500,53 +587,32 @@ export class Cpu2A03 {
 
     // ROL - Rotate Left
     processInstruction_ROL(): boolean {
-        if (this.currentInstructionCycle <= 1 && this.currentInstructionAddressingMode != AddressingMode.Accumulator)
-            return false;
-
-        let address = this.currentInstructionAddress;
-        let value = this.nes.read(address!);
-
-        const result = ((value << 1) | ((this.status_flags & this.FLAG_CARRY) != 0 ? 1 : 0)) & 0xFF;
-        this.nes.write(address!, result);
-
-        this.toggleFlag(this.FLAG_CARRY, (value & (1 << 7)) != 0);
-        this.toggleFlag(this.FLAG_ZERO, result == 0);
-        this.toggleFlag(this.FLAG_NEGATIVE, (result & (1 << 7)) != 0);
-        return true;
+        return this.readModifyWrite((value) => {
+            const result = ((value << 1) | ((this.status_flags & this.FLAG_CARRY) != 0 ? 1 : 0)) & 0xFF;
+            this.toggleFlag(this.FLAG_CARRY, (value & 0x80) != 0);
+            this.setZN(result);
+            return result;
+        });
     }
 
     // ROR - Rotate Right
     processInstruction_ROR(): boolean {
-        if (this.currentInstructionCycle <= 1 && this.currentInstructionAddressingMode != AddressingMode.Accumulator)
-            return false;
-
-        let address = this.currentInstructionAddress;
-        let value = this.nes.read(address!);
-
-        const result = (value >> 1) | ((this.status_flags & this.FLAG_CARRY) != 0 ? 1 << 7 : 0);
-        this.nes.write(address!, result);
-
-        this.toggleFlag(this.FLAG_CARRY, (value & 1) != 0);
-        this.toggleFlag(this.FLAG_ZERO, result == 0);
-        this.toggleFlag(this.FLAG_NEGATIVE, (result & (1 << 7)) != 0);
-        return true;
+        return this.readModifyWrite((value) => {
+            const result = (value >> 1) | ((this.status_flags & this.FLAG_CARRY) != 0 ? 0x80 : 0);
+            this.toggleFlag(this.FLAG_CARRY, (value & 1) != 0);
+            this.setZN(result);
+            return result;
+        });
     }
 
     // LSR - Logical Shift Right
     processInstruction_LSR(): boolean {
-        if (this.currentInstructionCycle <= 1 && this.currentInstructionAddressingMode != AddressingMode.Accumulator)
-            return false;
-
-        let address = this.currentInstructionAddress;
-        let value = this.nes.read(address!);
-
-        const result = (value >> 1);
-        this.nes.write(address!, result);
-
-        this.toggleFlag(this.FLAG_CARRY, (value & 1) != 0);
-        this.toggleFlag(this.FLAG_ZERO, result == 0);
-        this.toggleFlag(this.FLAG_NEGATIVE, (result & (1 << 7)) != 0);
-        return true;
+        return this.readModifyWrite((value) => {
+            const result = value >> 1;
+            this.toggleFlag(this.FLAG_CARRY, (value & 1) != 0);
+            this.setZN(result);
+            return result;
+        });
     }
     // TAX - Transfer Accumulator to Index X
     processInstruction_TAX(): boolean {
@@ -596,22 +662,11 @@ export class Cpu2A03 {
 
     // DEC - Decrement Memory
     processInstruction_DEC(): boolean {
-        if (this.currentInstructionCycle == 0) {
-            this.tempAddressArg = this.loadValue();
-            return false;
-        }
-
-        if (this.currentInstructionCycle == 1) {
-            this.nes.write(this.currentInstructionAddress!, this.tempAddressArg); // Read, modify, write back
-            return false;
-        }
-
-        this.tempAddressArg = (this.tempAddressArg - 1) & 0xFF;
-        this.nes.write(this.currentInstructionAddress!, this.tempAddressArg);
-
-        this.toggleFlag(this.FLAG_ZERO, this.tempAddressArg == 0);
-        this.toggleFlag(this.FLAG_NEGATIVE, (this.tempAddressArg & (1 << 7)) != 0);
-        return true;
+        return this.readModifyWrite((value) => {
+            const result = (value - 1) & 0xFF;
+            this.setZN(result);
+            return result;
+        });
     }
 
     // INX - Increment X Register
@@ -634,22 +689,11 @@ export class Cpu2A03 {
 
     // INC - Increment Memory
     processInstruction_INC(): boolean {
-        if (this.currentInstructionCycle == 0) {
-            this.tempAddressArg = this.loadValue();
-            return false;
-        }
-
-        if (this.currentInstructionCycle == 1) {
-            this.nes.write(this.currentInstructionAddress!, this.tempAddressArg); // Read, modify, write back
-            return false;
-        }
-
-        this.tempAddressArg = (this.tempAddressArg + 1) & 0xFF;
-        this.nes.write(this.currentInstructionAddress!, this.tempAddressArg);
-
-        this.toggleFlag(this.FLAG_ZERO, this.tempAddressArg == 0);
-        this.toggleFlag(this.FLAG_NEGATIVE, (this.tempAddressArg & (1 << 7)) != 0);
-        return true;
+        return this.readModifyWrite((value) => {
+            const result = (value + 1) & 0xFF;
+            this.setZN(result);
+            return result;
+        });
     }
 
     // INX - Increment X Register
@@ -677,6 +721,7 @@ export class Cpu2A03 {
             return false;
         }
 
+        // PHP pushes with B and bit 5 set
         const flagsBytes = this.status_flags | this.FLAG_UNUSED | this.FLAG_BREAK;
         this.pushStack(flagsBytes);
         return true;
@@ -695,7 +740,7 @@ export class Cpu2A03 {
         this.toggleFlag(this.FLAG_DECIMAL, (newFlags & this.FLAG_DECIMAL) != 0);
         this.toggleFlag(this.FLAG_OVERFLOW, (newFlags & this.FLAG_OVERFLOW) != 0);
         this.toggleFlag(this.FLAG_NEGATIVE, (newFlags & this.FLAG_NEGATIVE) != 0);
-        this.pendingInterruptDisableFlag = (newFlags & this.FLAG_INTERRUPT) != 0;
+        this.setInterruptDisableDelayed((newFlags & this.FLAG_INTERRUPT) != 0);
 
         return true;
     }
@@ -913,13 +958,21 @@ export class Cpu2A03 {
 
     // CLI - Clear Interrupt Disable
     processInstruction_CLI(): boolean {
-        this.toggleFlag(this.FLAG_INTERRUPT, false);
+        this.setInterruptDisableDelayed(false);
         return true;
+    }
+
+    // CLI/SEI/PLP: the flag changes immediately, but the IRQ poll at the next instruction boundary
+    // still uses the previous value (one-instruction latency).
+    private setInterruptDisableDelayed(value: boolean) {
+        this.irqPollOldIFlag = (this.status_flags & this.FLAG_INTERRUPT) != 0;
+        this.irqPollUseOldIFlag = true;
+        this.toggleFlag(this.FLAG_INTERRUPT, value);
     }
 
     // SEI - Set Interrupt Disable
     processInstruction_SEI(): boolean {
-        this.pendingInterruptDisableFlag = true;
+        this.setInterruptDisableDelayed(true);
         return true;
     }
 
@@ -953,31 +1006,29 @@ export class Cpu2A03 {
 
     // STX - Store X Register
     processInstruction_STX(): boolean {
-
-        if (this.nes.isNormalAddress(this.currentInstructionAddress!)) {
-            this.instructionResult.target_address_value = this.nes.read(this.currentInstructionAddress!);
-        }
-
-        this.nes.write(this.currentInstructionAddress!, this.register_X);
+        this.store(this.register_X);
         return true;
     }
 
     // STY - Store Y Register
     processInstruction_STY(): boolean {
-        if (this.nes.isNormalAddress(this.currentInstructionAddress!)) {
-            this.instructionResult.target_address_value = this.nes.read(this.currentInstructionAddress!);
-        }
-        this.nes.write(this.currentInstructionAddress!, this.register_Y);
+        this.store(this.register_Y);
         return true;
     }
 
     // STA - Store Accumulator
     processInstruction_STA(): boolean {
-        if (this.nes.isNormalAddress(this.currentInstructionAddress!)) {
-            this.instructionResult.target_address_value = this.nes.read(this.currentInstructionAddress!);
-        }
-        this.nes.write(this.currentInstructionAddress!, this.register_A);
+        this.store(this.register_A);
         return true;
+    }
+
+    private store(value: number) {
+        const address = this.currentInstructionAddress!;
+        if (LOG_INSTRUCTIONS && address < 0x2000) {
+            // Side-effect free peek of internal RAM for the instruction log
+            this.instructionResult.target_address_value = this.nes.getRam().read(address & 0x7FF);
+        }
+        this.nes.write(address, value);
     }
 
     // LDX - Load X Register
@@ -1032,7 +1083,7 @@ export class Cpu2A03 {
         if (this.currentInstructionCycle <= 2)
             return false;
 
-        this.pushStack16(this.register_PC - 1);
+        this.pushStack16((this.register_PC - 1) & 0xFFFF);
         this.register_PC = this.currentInstructionAddress!;
         return true;
     }
@@ -1042,7 +1093,7 @@ export class Cpu2A03 {
         if (this.currentInstructionCycle <= 3)
             return false;
 
-        this.register_PC = this.popStack16() + 1;
+        this.register_PC = (this.popStack16() + 1) & 0xFFFF;
         return true;
     }
 
@@ -1051,7 +1102,8 @@ export class Cpu2A03 {
         if (this.currentInstructionCycle <= 3)
             return false;
 
-        this.status_flags = this.popStack() | (this.status_flags & this.FLAG_BREAK);
+        // RTI restores I immediately; B and bit 5 from the stack are ignored
+        this.status_flags = (this.popStack() & ~this.FLAG_BREAK) | this.FLAG_UNUSED;
         this.register_PC = this.popStack16();
 
         if (this.nes.breakOnRti) {
@@ -1062,18 +1114,12 @@ export class Cpu2A03 {
 
     // ASL - Arithmetic Shift Left
     processInstruction_ASL(): boolean {
-        if (this.currentInstructionCycle <= 1 && this.currentInstructionAddressingMode != AddressingMode.Accumulator)
-            return false;
-
-        const value = this.loadValue();
-        const newValue = (value << 1) & 0xFF;
-
-        this.toggleFlag(this.FLAG_CARRY, (value & (1 << 7)) != 0);
-        this.toggleFlag(this.FLAG_ZERO, newValue == 0);
-        this.toggleFlag(this.FLAG_NEGATIVE, (newValue & (1 << 7)) != 0);
-
-        this.nes.write(this.currentInstructionAddress!, newValue);
-        return true;
+        return this.readModifyWrite((value) => {
+            const result = (value << 1) & 0xFF;
+            this.toggleFlag(this.FLAG_CARRY, (value & 0x80) != 0);
+            this.setZN(result);
+            return result;
+        });
     }
 
     // AND - Logical AND
@@ -1122,30 +1168,54 @@ export class Cpu2A03 {
 
     // ADC - Add with Carry
     processInstruction_ADC(): boolean {
-        const value = this.loadValue();
-
-        var result = this.register_A + value + (this.status_flags & this.FLAG_CARRY ? 1 : 0);
-
-        this.toggleFlag(this.FLAG_CARRY, result > 0xFF);
-        this.toggleFlag(this.FLAG_ZERO, (result & 0xFF) == 0);
-        this.toggleFlag(this.FLAG_OVERFLOW, ((result ^ this.register_A) & (result ^ value) & 0x80) != 0);
-        this.toggleFlag(this.FLAG_NEGATIVE, (result & (1 << 7)) != 0);
-
-        this.register_A = result & 0xFF;
+        this.addWithCarry(this.loadValue());
         return true;
     }
 
     // SBC - Subtract with Carry
     processInstruction_SBC(): boolean {
-        let value: number = this.loadValue();
-        var result = this.register_A + ~value + (this.status_flags & this.FLAG_CARRY ? 1 : 0);
+        this.addWithCarry(this.loadValue() ^ 0xFF);
+        return true;
+    }
 
-        this.toggleFlag(this.FLAG_CARRY, (~result < 0x00));
-        this.toggleFlag(this.FLAG_ZERO, result == 0);
-        this.toggleFlag(this.FLAG_OVERFLOW, ((result ^ this.register_A) & (result ^ ~value) & 0x80) != 0);
-        this.toggleFlag(this.FLAG_NEGATIVE, (result & (1 << 7)) != 0);
+    private addWithCarry(value: number) {
+        const result = this.register_A + value + (this.status_flags & this.FLAG_CARRY ? 1 : 0);
 
+        this.toggleFlag(this.FLAG_CARRY, result > 0xFF);
+        this.toggleFlag(this.FLAG_OVERFLOW, ((result ^ this.register_A) & (result ^ value) & 0x80) != 0);
         this.register_A = result & 0xFF;
+        this.setZN(this.register_A);
+    }
+
+    private compare(register: number, value: number) {
+        this.toggleFlag(this.FLAG_CARRY, register >= value);
+        this.setZN((register - value) & 0xFF);
+    }
+
+    private setZN(value: number) {
+        this.toggleFlag(this.FLAG_ZERO, (value & 0xFF) == 0);
+        this.toggleFlag(this.FLAG_NEGATIVE, (value & 0x80) != 0);
+    }
+
+    // Read-modify-write: read (cycle 0), dummy write of the original value (cycle 1), final write (cycle 2).
+    private readModifyWrite(operation: (value: number) => number): boolean {
+        if (this.currentInstructionAddressingMode == AddressingMode.Accumulator) {
+            this.register_A = operation(this.register_A) & 0xFF;
+            return true;
+        }
+
+        if (this.currentInstructionCycle == 0) {
+            this.tempAddressArg = this.nes.read(this.currentInstructionAddress!);
+            this.instructionResult.target_address_value = this.tempAddressArg;
+            return false;
+        }
+
+        if (this.currentInstructionCycle == 1) {
+            this.nes.write(this.currentInstructionAddress!, this.tempAddressArg);
+            return false;
+        }
+
+        this.nes.write(this.currentInstructionAddress!, operation(this.tempAddressArg) & 0xFF);
         return true;
     }
 
@@ -1227,7 +1297,7 @@ export class Cpu2A03 {
             this.advancePC();
 
         let address = u8toSigned(arg);
-        const final_address = this.register_PC + address;
+        const final_address = (this.register_PC + address) & 0xFFFF;
         this.currentInstructionAddress = final_address;
 
         const pc_low_byte = this.register_PC & 0xFF;
@@ -1483,8 +1553,8 @@ export class Cpu2A03 {
     }
 
     pushStack(value: number) {
-        this.nes.write(this.STACK_START + this.register_SP, value);
-        this.register_SP--;
+        this.nes.write(this.STACK_START + this.register_SP, value & 0xFF);
+        this.register_SP = (this.register_SP - 1) & 0xFF;
     }
 
     pushStack16(value: number) {
@@ -1499,27 +1569,15 @@ export class Cpu2A03 {
     }
 
     popStack(): number {
-        this.register_SP++;
+        this.register_SP = (this.register_SP + 1) & 0xFF;
         const value = this.nes.read(this.STACK_START + this.register_SP);
         return value;
     }
 
 
+    // Stores and read-modify-write instructions always take the extra indexed-addressing cycle.
     isStoreInstruction(): boolean {
-        return (this.instructionResult.instructionMetadata?.name.startsWith("ST") ||
-            this.instructionResult.instructionMetadata?.name.startsWith("LS") ||
-            this.instructionResult.instructionMetadata?.name.startsWith("RO") ||
-            this.instructionResult.instructionMetadata?.name.startsWith("LO") ||
-            this.instructionResult.instructionMetadata?.name == "INC" ||
-            this.instructionResult.instructionMetadata?.name == "DEC" ||
-            this.instructionResult.instructionMetadata?.name == "DCP" ||
-            this.instructionResult.instructionMetadata?.name == "ISB" ||
-            this.instructionResult.instructionMetadata?.name == "SLO" ||
-            this.instructionResult.instructionMetadata?.name == "SRE" ||
-            this.instructionResult.instructionMetadata?.name == "RLA" ||
-            this.instructionResult.instructionMetadata?.name == "RRA" ||
-            this.instructionResult.instructionMetadata?.name.startsWith("AS"))
-            ?? false;
+        return this.currentInstructionIsStore;
     }
 
     NMI() {
@@ -1527,13 +1585,26 @@ export class Cpu2A03 {
         //console.log(`NMI triggered on ${numberToHex(this.register_PC)} Instruction: ${this.instructionResult.instructionMetadata?.name}`);
     }
 
-    IRQ() {
-        if ((this.status_flags & this.FLAG_INTERRUPT) == 0) {
-            this.pendingIRQFlag = true;
+    // Withdraw an NMI that hasn't been taken yet (PPU $2002 read race at VBL start).
+    cancelNMI() {
+        this.pendingNonMaskableInterruptFlag = false;
+    }
+
+    // Level-triggered IRQ input. `source` is a bitmask (Cpu2A03.IRQ_SOURCE_*). A source must keep its
+    // line asserted until the IRQ is acknowledged by the program.
+    setIrqLine(source: number, asserted: boolean) {
+        if (asserted) {
+            this.irqLines |= source;
+        }
+        else {
+            this.irqLines &= ~source;
         }
     }
 
-
+    // Legacy one-shot IRQ request. Kept for compatibility; prefer setIrqLine().
+    IRQ() {
+        this.pendingIRQFlag = true;
+    }
 
     getInstructionFunc(instructionOpCode: number): Instruction {
         const instructionData = instructionMap[instructionOpCode];
@@ -1541,6 +1612,7 @@ export class Cpu2A03 {
         let instructionFunc: Instruction | undefined = undefined;
 
         this.currentInstructionAddressingMode = instructionData.mode;
+        this.currentInstructionIsStore = STORE_INSTRUCTIONS.has(instructionData.name);
 
         if (!(this.currentInstructionAddressingMode == AddressingMode.Implied || instructionData.mode == AddressingMode.Immediate))
             this.currentInstructionAddressFunction = this.getAddressFunction(this.currentInstructionAddressingMode);
@@ -1756,6 +1828,42 @@ export class Cpu2A03 {
                 break;
             case "BRK":
                 instructionFunc = this.processInstruction_BRK;
+                break;
+            case "ANC":
+                instructionFunc = this.processInstruction_ANC;
+                break;
+            case "ALR":
+                instructionFunc = this.processInstruction_ALR;
+                break;
+            case "ARR":
+                instructionFunc = this.processInstruction_ARR;
+                break;
+            case "XAA":
+                instructionFunc = this.processInstruction_XAA;
+                break;
+            case "LXA":
+                instructionFunc = this.processInstruction_LXA;
+                break;
+            case "AXS":
+                instructionFunc = this.processInstruction_AXS;
+                break;
+            case "LAS":
+                instructionFunc = this.processInstruction_LAS;
+                break;
+            case "SHY":
+                instructionFunc = this.processInstruction_SHY;
+                break;
+            case "SHX":
+                instructionFunc = this.processInstruction_SHX;
+                break;
+            case "AHX":
+                instructionFunc = this.processInstruction_AHX;
+                break;
+            case "TAS":
+                instructionFunc = this.processInstruction_TAS;
+                break;
+            case "KIL":
+                instructionFunc = this.processInstruction_KIL;
                 break;
 
             default:

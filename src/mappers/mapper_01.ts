@@ -34,25 +34,23 @@ export class Mapper01 extends Cartridge {
 
 
     ppu_read(address: number): number {
-        address = this.mapPPUAddress(address);
+        address = this.mapPPUAddress(address & 0x1FFF);
 
         if (this.header.chrRomSize > 0) {
-            return this.characterRom[address];
+            return this.characterRom[address % this.characterRom.length];
         }
         else {
-            return this.characterRam[address];
+            return this.characterRam[address % this.characterRam.length];
         }
 
     }
 
     ppu_write(address: number, value: number): void {
-        address = this.mapPPUAddress(address);
+        address = this.mapPPUAddress(address & 0x1FFF);
 
-        if (this.header.chrRomSize > 0) {
-            this.characterRom[address] = value;
-        }
-        else {
-            this.characterRam[address] = value;
+        // CHR ROM is read-only; only CHR RAM carts can be written
+        if (this.header.chrRomSize == 0) {
+            this.characterRam[address % this.characterRam.length] = value;
         }
     }
 
@@ -121,7 +119,7 @@ export class Mapper01 extends Cartridge {
         }
         else if (address >= 0x8000 && address <= 0xFFFF) {
             const readAddress = this.mapROMAddress(address);
-            return this.programRom[readAddress];
+            return this.programRom[readAddress % this.programRom.length];
         }
         else {
             console.error(`Read from unknown cartridge address: ${numberToHex(address)}`);
@@ -215,32 +213,12 @@ export class Mapper01 extends Cartridge {
 
     mapNametableAddress(address: number): number {
         if (this.nametableArrangement == 0) {
-            // One screen, lower bank
-            if (address < 0x2400) {
-                address += 0x400;
-            }
-            else if (address >= 0x2400 && address < 0x2800) {
-            }
-            else if (address >= 0x2800 && address < 0x2C00) {
-                address -= 0x400;
-            }
-            else {
-                address -= 0x800;
-            }
+            // One screen, lower bank: every nametable maps to the first 1KB page ($2000)
+            address = 0x2000 | (address & 0x3FF);
         }
         else if (this.nametableArrangement == 1) {
-            // One screen, upper bank
-            if (address < 0x2400) {
-            }
-            else if (address >= 0x2400 && address < 0x2800) {
-                address -= 0x400;
-            }
-            else if (address >= 0x2800 && address < 0x2C00) {
-                address -= 0x800;
-            }
-            else {
-                address -= 0xC00;
-            }
+            // One screen, upper bank: every nametable maps to the second 1KB page ($2400)
+            address = 0x2400 | (address & 0x3FF);
         }
         else if (this.nametableArrangement == 2) {
             // Vertical mirroring

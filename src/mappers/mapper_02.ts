@@ -1,34 +1,21 @@
-import { numberToHex } from "../emulator/utils";
 import { Cartridge } from "../nes/cartridge";
 
+// UxROM: switchable 16KB PRG bank at $8000, last bank fixed at $C000, CHR RAM (or ROM).
 export class Mapper02 extends Cartridge {
     currentBank: number = 0;
 
     ppu_read(address: number): number {
-        if (address <= 0x1FFF) {
-            if (this.header.chrRomSize > 0) {
-                return this.characterRom[address];
-            }
-            else {
-                return this.programRam[address];
-            }
+        address &= 0x1FFF;
+        if (this.header.chrRomSize > 0) {
+            return this.characterRom[address];
         }
-        else {
-            throw new Error("PPU read: Invalid address " + numberToHex(address));
-        }
+        return this.characterRam[address];
     }
 
     ppu_write(address: number, value: number): void {
-        if (address <= 0x1FFF) {
-            if (this.header.chrRomSize > 0) {
-                this.characterRom[address] = value;
-            }
-            else {
-                this.programRam[address] = value;
-            }
-        }
-        else {
-            throw new Error("PPU write: Invalid address " + numberToHex(address));
+        // CHR ROM is read-only; only CHR RAM carts can be written
+        if (this.header.chrRomSize == 0) {
+            this.characterRam[address & 0x1FFF] = value;
         }
     }
 
@@ -40,17 +27,19 @@ export class Mapper02 extends Cartridge {
             const bank = this.header.prgRomSize - 1;
             return this.programRom[bank * 0x4000 + (address - 0xC000)];
         }
-        else {
-            throw new Error("Read: Invalid address " + numberToHex(address));
+        else if (address >= 0x6000 && address <= 0x7FFF) {
+            return this.programRam[address - 0x6000];
         }
+        return 0;
     }
 
     write(address: number, value: number): void {
         if (address >= 0x8000 && address <= 0xFFFF) {
-            this.currentBank = value & 0x7;
+            // UNROM uses 3 bits, UOROM 4, UNROM 512 5: wrap by the actual bank count
+            this.currentBank = (value & 0xFF) % Math.max(1, this.header.prgRomSize);
         }
-        else {
-            throw new Error("Write: Invalid address " + numberToHex(address));
+        else if (address >= 0x6000 && address <= 0x7FFF) {
+            this.programRam[address - 0x6000] = value;
         }
     }
 

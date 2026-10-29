@@ -230,7 +230,7 @@ export class APU implements BusDevice {
 
     read(address: number): number {
         // APU status read
-        if (address === 0x4000) {
+        if (address === 0x4015) {
             let status = 0;
             if (!this.channel_pulse1.isLengthCounterZero()) {
                 status |= 0x01;
